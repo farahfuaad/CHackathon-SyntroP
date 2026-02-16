@@ -70,7 +70,7 @@ const App: React.FC = () => {
           <div className="bg-blue-600 p-2 rounded-lg text-white">
             <BrainCircuit size={24} />
           </div>
-          <h1 className="font-bold text-xl text-slate-800 tracking-tight">Fiamma AI</h1>
+          <h1 className="font-bold text-xl text-slate-800 tracking-tight">Syntro-P</h1>
         </div>
 
         <nav className="flex flex-col gap-2">

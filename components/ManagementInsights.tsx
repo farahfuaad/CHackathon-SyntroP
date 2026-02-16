@@ -1,10 +1,7 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { SKU, PurchaseRequisition, WarehouseCategory } from '../types';
-import { getProcurementInsights } from '../geminiService';
 import { 
   Sparkles, 
-  Loader2, 
   CheckCircle, 
   XCircle, 
   MessageSquare, 
@@ -24,19 +21,24 @@ interface Props {
 }
 
 const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
-  const [insights, setInsights] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(true);
   const [expandedPr, setExpandedPr] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchInsights = async () => {
-      setLoading(true);
-      const data = await getProcurementInsights(skus);
-      setInsights(data || 'No insights available.');
-      setLoading(false);
-    };
-    fetchInsights();
-  }, [skus]);
+  const mockInsights = `
+## Procurement Analysis Summary
+
+### 🔴 Critical Risks
+- Implement strategic stockpiling for high-velocity items
+- Monitor supplier lead time performance weekly
+
+### 📊 Overstocking Risks
+- Review slow-moving inventory for markdown opportunities
+- Negotiate seasonal discounts with key suppliers
+
+### ✅ Recommended Actions
+1. Prioritize restocking for critical low-stock items
+2. Implement quality control measures for high-failure SKUs
+3. Optimize lead times with supplier negotiations
+4. Establish dynamic safety stock levels`;
 
   const calculateTotalStock = (sku: SKU) => {
     const excluded = [WarehouseCategory.PROJECT, WarehouseCategory.CORPORATE];
@@ -55,10 +57,6 @@ const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
     const totalStock = currentStock + proposedQty;
     const monthsLast = totalStock / sku.ams;
     
-    // Logic for appropriate quantities (BR6)
-    // Suitable: 3 to 6 months of stock
-    // Too Little: < 3 months
-    // Too Much: > 6 months
     if (monthsLast < 3) return { status: 'Too Little', color: 'text-red-600', months: monthsLast, icon: TrendingDown };
     if (monthsLast > 6) return { status: 'Too Much', color: 'text-amber-600', months: monthsLast, icon: TrendingUp };
     return { status: 'Suitable', color: 'text-green-600', months: monthsLast, icon: Target };
@@ -73,7 +71,7 @@ const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      {/* AI Reasoning Panel (BR6: Data-driven insights) */}
+      {/* AI Reasoning Panel */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-fit">
         <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -81,37 +79,27 @@ const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
               <Sparkles size={20} />
             </div>
             <div>
-              <h3 className="font-bold text-lg">AI Procurement Advisor</h3>
-              <p className="text-xs text-slate-400">Contextual Reasoning System</p>
+              <h3 className="font-bold text-lg">Procurement Advisor</h3>
+              <p className="text-xs text-slate-400">Strategic Insights</p>
             </div>
           </div>
-          {loading && <Loader2 className="animate-spin text-blue-400" size={20} />}
         </div>
         
         <div className="p-8 flex-1">
-          {loading ? (
-            <div className="space-y-4 animate-pulse">
-              <div className="h-4 bg-slate-100 rounded w-3/4"></div>
-              <div className="h-4 bg-slate-100 rounded w-full"></div>
-              <div className="h-4 bg-slate-100 rounded w-5/6"></div>
-              <div className="h-3 bg-slate-100 rounded w-1/2"></div>
-            </div>
-          ) : (
-            <div className="text-slate-700 leading-relaxed whitespace-pre-wrap text-sm font-medium bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
-              {insights}
-            </div>
-          )}
+          <div className="text-slate-700 leading-relaxed whitespace-pre-wrap text-sm font-medium bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
+            {mockInsights}
+          </div>
         </div>
 
         <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4">
            <button className="flex-1 bg-white border border-slate-200 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-100 transition-all flex items-center justify-center gap-2 shadow-sm">
              <MessageSquare size={18} />
-             Query Analysis
+             View Analysis
            </button>
         </div>
       </div>
 
-      {/* Approval Workflow & BR6 Validation Details */}
+      {/* Approval Workflow Panel */}
       <div className="space-y-6">
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-6">
@@ -173,13 +161,13 @@ const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
                     </div>
                   </div>
 
-                  {/* BR6 Detailed Validation Panel */}
+                  {/* Validation Details */}
                   {expandedPr === pr.id && (
                     <div className="px-6 pb-6 animate-in slide-in-from-top-2 duration-300">
                       <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4 mb-6">
                         <h5 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                           <Target size={14} className="text-blue-500" />
-                          BR6: Procurement Appropriateness Validation
+                          Procurement Appropriateness Validation
                         </h5>
                         
                         <div className="space-y-4">
@@ -198,9 +186,9 @@ const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
                                     <p className="text-xs font-bold">{val.months.toFixed(1)} Months</p>
                                   </div>
                                   <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${val.color} bg-white shadow-sm`}>
-                                    <ValIcon size={12} />
-                                    <span className="text-[10px] font-bold">{val.status}</span>
-                                  </div>
+                                      {ValIcon && <ValIcon size={12} />}
+                                      <span className="text-[10px] font-bold">{val.status}</span>
+                                    </div>
                                 </div>
                               </div>
                             );
@@ -210,7 +198,7 @@ const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
                         <div className="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-xl flex gap-3">
                           <Clock size={16} className="text-amber-600 shrink-0" />
                           <p className="text-[10px] text-amber-800 leading-tight">
-                            <strong>Seasonal Note:</strong> Validation accounts for 1.2x festival factor for Hood Cookers & Ducting. Stock levels above 6 months flagged as overstock risks.
+                            <strong>Note:</strong> Stock levels above 6 months flagged as overstock risks. Levels below 3 months require urgent restocking.
                           </p>
                         </div>
                       </div>
@@ -247,11 +235,10 @@ const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
            </div>
            <h3 className="text-xl font-bold mb-2">Strategic Insight</h3>
            <p className="text-blue-100 text-sm mb-6 leading-relaxed">
-             Analysis of past sales suggests SIROCCO models are entering a high-velocity cycle. 
-             We recommend approving these quantities to maintain 100% service levels.
+             Based on historical data, prioritize high-velocity items to maintain optimal service levels.
            </p>
            <button className="bg-white text-blue-700 font-bold px-8 py-3.5 rounded-2xl hover:bg-blue-50 transition-all shadow-lg active:scale-95 flex items-center gap-2">
-              Apply Strategy Patch
+              Review Recommendations
            </button>
         </div>
       </div>
