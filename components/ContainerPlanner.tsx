@@ -1,18 +1,18 @@
 
 import React, { useState } from 'react';
 import { SKU, ContainerType, PurchaseRequisition } from '../types';
-import { CONTAINER_TYPES } from '../constants';
-import { Box, Calculator, FileDown, Plus, Trash2, Loader2 } from 'lucide-react';
+import { Box, Calculator, FileDown, Trash2, Loader2 } from 'lucide-react';
 
 interface Props {
   skus: SKU[];
+  containerTypes: ContainerType[];
   selectedSkus: { skuId: string, qty: number }[];
   setSelectedSkus: React.Dispatch<React.SetStateAction<{ skuId: string, qty: number }[]>>;
   onGeneratePr: (pr: PurchaseRequisition) => void;
 }
 
-const ContainerPlanner: React.FC<Props> = ({ skus, selectedSkus, setSelectedSkus, onGeneratePr }) => {
-  const [containerType, setContainerType] = useState<ContainerType>(CONTAINER_TYPES[0]);
+const ContainerPlanner: React.FC<Props> = ({ skus, containerTypes, selectedSkus, setSelectedSkus, onGeneratePr }) => {
+  const [containerType, setContainerType] = useState<ContainerType>(containerTypes[0]);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const addSku = (skuId: string) => {
@@ -53,17 +53,20 @@ const ContainerPlanner: React.FC<Props> = ({ skus, selectedSkus, setSelectedSkus
 
   const handleGenerate = async () => {
     setIsGenerating(true);
-    // Simulate generation time
     await new Promise(r => setTimeout(r, 1500));
 
     const newPr: PurchaseRequisition = {
       id: `PR-${Date.now().toString().slice(-6)}`,
       title: `Stock Replenishment - ${new Date().toLocaleDateString()}`,
-      items: selectedSkus.map(item => ({
-        skuId: item.skuId,
-        model: skus.find(s => s.id === item.skuId)?.model || 'Unknown',
-        qty: item.qty
-      })),
+      items: selectedSkus.map(item => {
+        const sku = skus.find(s => s.id === item.skuId);
+        return {
+          skuId: item.skuId,
+          model: sku?.model || 'Unknown',
+          qty: item.qty,
+          supplierId: sku?.supplierId || 'Unknown'
+        };
+      }),
       containerType: containerType.name,
       utilizationCbm: stats.volPercent,
       utilizationWeight: stats.weightPercent,
@@ -157,9 +160,9 @@ const ContainerPlanner: React.FC<Props> = ({ skus, selectedSkus, setSelectedSkus
             <select 
               className="w-full border border-slate-200 rounded-xl px-4 py-3 bg-slate-50 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
               value={containerType.name}
-              onChange={(e) => setContainerType(CONTAINER_TYPES.find(c => c.name === e.target.value)!)}
+              onChange={(e) => setContainerType(containerTypes.find(c => c.name === e.target.value)!)}
             >
-              {CONTAINER_TYPES.map(c => (
+              {containerTypes.map(c => (
                 <option key={c.name} value={c.name}>{c.name} ({c.capacityCbm} CBM)</option>
               ))}
             </select>
@@ -217,7 +220,6 @@ const ContainerPlanner: React.FC<Props> = ({ skus, selectedSkus, setSelectedSkus
                 </>
               )}
             </button>
-            <p className="text-[10px] text-center text-slate-400 mt-4 uppercase tracking-widest font-bold">BR4: Automated Requisition</p>
           </div>
         </div>
       </div>
