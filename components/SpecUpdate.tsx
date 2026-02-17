@@ -275,7 +275,7 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
             className="flex items-center gap-2 bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 active:scale-95"
           >
             {saveStatus ? <CheckCircle2 size={20} /> : <Save size={20} />}
-            {saveStatus ? 'Changes Applied' : 'Commit Changes to Reference Master'}
+            {saveStatus ? 'Changes Applied' : 'Save Changes'}
           </button>
         </div>
       </div>

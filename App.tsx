@@ -10,7 +10,9 @@ import {
   TrendingUp,
   BrainCircuit,
   FileCheck,
-  Database
+  Database,
+  Bookmark,
+  ClipboardClock
 } from 'lucide-react';
 import { SKU, WarehouseCategory, PurchaseRequisition, BUParameters, Supplier, ContainerType } from './types';
 import { MOCK_SKUS, MOCK_SUPPLIERS, CONTAINER_TYPES } from './constants';
@@ -78,15 +80,15 @@ const App: React.FC = () => {
           <div className="bg-blue-600 p-2 rounded-lg text-white">
             <BrainCircuit size={24} />
           </div>
-          <h1 className="font-bold text-xl text-slate-800 tracking-tight">Fiamma AI</h1>
+          <h1 className="font-bold text-xl text-slate-800 tracking-tight">Syntro-P</h1>
         </div>
 
         <nav className="flex flex-col gap-2">
           <SidebarItem id="dashboard" label="Dashboard" icon={LayoutDashboard} />
           <SidebarItem id="planning" label="Procurement Sheet" icon={Package} />
           <SidebarItem id="container" label="Container Planning" icon={Truck} />
-          <SidebarItem id="approvals" label="Queue and Approvals" icon={FileCheck} />
-          <SidebarItem id="spec" label="Specification Update" icon={Database} />
+          <SidebarItem id="approvals" label="Queue and Approvals" icon={ClipboardClock} />
+          <SidebarItem id="spec" label="Specification Update" icon={Package} />
         </nav>
       </aside>
 
