@@ -206,7 +206,7 @@ STATUS: SYSTEM APPROVED
                                 className="w-full bg-green-600 text-white font-bold py-4 rounded-2xl hover:bg-green-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-200 active:scale-95"
                               >
                                 <CheckCircle size={18} />
-                                Approve and Email (BR 2)
+                                Approve and Email
                               </button>
                               <button 
                                 onClick={() => handleReject(pr.id)}
