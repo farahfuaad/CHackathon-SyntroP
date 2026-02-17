@@ -13,21 +13,28 @@ import {
   BrainCircuit,
   FileCheck
 } from 'lucide-react';
-import { SKU, WarehouseCategory, PurchaseRequisition } from './types';
+import { SKU, WarehouseCategory, PurchaseRequisition, BUParameters } from './types';
 import { MOCK_SKUS } from './constants';
 import ProcurementSheet from './components/ProcurementSheet';
 import RiskDashboard from './components/RiskDashboard';
 import ContainerPlanner from './components/ContainerPlanner';
 import ManagementInsights from './components/ManagementInsights';
 
+// Internal default requirements for AI context
+const DEFAULT_BU_PARAMS: BUParameters = {
+  leadGrowthTarget: 15,
+  seasonalMultiplier: 1.2,
+  safetyStockBufferWeeks: 2,
+  promotionalActivity: "Standard operational cycle with focus on growth."
+};
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'risk' | 'container' | 'management'>('dashboard');
   const [skus, setSkus] = useState<SKU[]>(MOCK_SKUS);
   const [plannedSkus, setPlannedSkus] = useState<{ skuId: string, qty: number }[]>([]);
   const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
-
+  
   const calculateTotalStock = (sku: SKU) => {
-    // Exclude Project and Corporate as per requirements
     const excluded = [WarehouseCategory.PROJECT, WarehouseCategory.CORPORATE];
     const inHand = Object.entries(sku.inStock).reduce((acc, [cat, val]) => {
       if (!excluded.includes(cat as WarehouseCategory)) return acc + (val as number);
@@ -45,8 +52,8 @@ const App: React.FC = () => {
 
   const handleGeneratePr = (newPr: PurchaseRequisition) => {
     setPrs([newPr, ...prs]);
-    setPlannedSkus([]); // Clear planning sheet
-    setActiveTab('management'); // Switch to management for approval
+    setPlannedSkus([]); 
+    setActiveTab('management'); 
   };
 
   const SidebarItem = ({ id, label, icon: Icon }: { id: any, label: string, icon: any }) => (
@@ -64,13 +71,12 @@ const App: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 p-6 flex flex-col gap-8 fixed h-full">
         <div className="flex items-center gap-2 px-2">
           <div className="bg-blue-600 p-2 rounded-lg text-white">
             <BrainCircuit size={24} />
           </div>
-          <h1 className="font-bold text-xl text-slate-800 tracking-tight">Syntro-P</h1>
+          <h1 className="font-bold text-xl text-slate-800 tracking-tight">Fiamma AI</h1>
         </div>
 
         <nav className="flex flex-col gap-2">
@@ -78,18 +84,10 @@ const App: React.FC = () => {
           <SidebarItem id="planning" label="Procurement Sheet" icon={Package} />
           <SidebarItem id="risk" label="Risk & Quality" icon={AlertTriangle} />
           <SidebarItem id="container" label="Container Planning" icon={Truck} />
-          <SidebarItem id="management" label="AI Management" icon={FileCheck} />
+          <SidebarItem id="management" label="Queue and Approvals" icon={FileCheck} />
         </nav>
-
-        <div className="mt-auto pt-6 border-t border-slate-100">
-          <div className="bg-blue-50 p-4 rounded-xl">
-            <p className="text-xs font-semibold text-blue-600 uppercase mb-1">Active Scenario</p>
-            <p className="text-sm font-medium text-blue-900">Standard Stocks</p>
-          </div>
-        </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 ml-64 p-8">
         <header className="flex justify-between items-center mb-8">
           <div>
@@ -98,7 +96,7 @@ const App: React.FC = () => {
               {activeTab === 'planning' && 'Procurement Planning Sheet'}
               {activeTab === 'risk' && 'Quality & Risk Indicators'}
               {activeTab === 'container' && 'Automated Container Planning'}
-              {activeTab === 'management' && 'Decision Support Intelligence'}
+              {activeTab === 'management' && 'Queue and Approvals'}
             </h2>
             <p className="text-slate-500">Intelligent Supply Chain Management System</p>
           </div>
@@ -117,7 +115,7 @@ const App: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               <StatCard title="Total SKUs" value={skus.length} icon={Package} trend="+2%" color="blue" />
               <StatCard title="Critical Low Stock" value={skus.filter(s => calculateTotalStock(s) / s.ams < 1).length} icon={AlertTriangle} trend="-1" color="red" />
-              <StatCard title="Slow Moving" value={skus.filter(s => s.isSlowMoving).length} icon={TrendingUp} trend="Stable" color="amber" />
+              <StatCard title="Target Growth" value={`+${DEFAULT_BU_PARAMS.leadGrowthTarget}%`} icon={TrendingUp} trend="Forecasted" color="green" />
               <StatCard title="Active Shipments" value={skus.reduce((a, b) => a + (b.incoming > 0 ? 1 : 0), 0)} icon={Truck} trend="+3" color="green" />
             </div>
           )}
@@ -132,7 +130,14 @@ const App: React.FC = () => {
               onGeneratePr={handleGeneratePr}
             />
           )}
-          {activeTab === 'management' && <ManagementInsights skus={skus} prs={prs} setPrs={setPrs} />}
+          {activeTab === 'management' && (
+            <ManagementInsights 
+              skus={skus} 
+              prs={prs} 
+              setPrs={setPrs} 
+              buParams={DEFAULT_BU_PARAMS}
+            />
+          )}
         </section>
       </main>
     </div>

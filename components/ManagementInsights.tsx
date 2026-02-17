@@ -1,245 +1,284 @@
 import React, { useState } from 'react';
-import { SKU, PurchaseRequisition, WarehouseCategory } from '../types';
+import { SKU, PurchaseRequisition, Supplier } from '../types';
+import { MOCK_SUPPLIERS } from '../constants';
 import { 
-  Sparkles, 
   CheckCircle, 
   XCircle, 
-  MessageSquare, 
   Clock, 
-  TrendingDown, 
-  TrendingUp, 
-  Target,
   ChevronDown,
   ChevronUp,
-  CalendarDays
+  CalendarDays,
+  Mail,
+  Download,
+  FileText,
+  UserCheck,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 interface Props {
   skus: SKU[];
   prs: PurchaseRequisition[];
   setPrs: React.Dispatch<React.SetStateAction<PurchaseRequisition[]>>;
+  buParams: any;
 }
 
 const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
   const [expandedPr, setExpandedPr] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [actionLabel, setActionLabel] = useState<string>('');
 
-  const mockInsights = `
-## Procurement Analysis Summary
-
-### 🔴 Critical Risks
-- Implement strategic stockpiling for high-velocity items
-- Monitor supplier lead time performance weekly
-
-### 📊 Overstocking Risks
-- Review slow-moving inventory for markdown opportunities
-- Negotiate seasonal discounts with key suppliers
-
-### ✅ Recommended Actions
-1. Prioritize restocking for critical low-stock items
-2. Implement quality control measures for high-failure SKUs
-3. Optimize lead times with supplier negotiations
-4. Establish dynamic safety stock levels`;
-
-  const calculateTotalStock = (sku: SKU) => {
-    const excluded = [WarehouseCategory.PROJECT, WarehouseCategory.CORPORATE];
-    const inHand = Object.entries(sku.inStock).reduce((acc, [cat, val]) => {
-      if (!excluded.includes(cat as WarehouseCategory)) return acc + (val as number);
-      return acc;
-    }, 0);
-    return inHand + sku.incoming;
+  const handleApprove = async (id: string) => {
+    setProcessingId(id);
+    setActionLabel('Approving & Notifying...');
+    
+    // BR 2: Simulate sending email to Approvers and Suppliers
+    await new Promise(r => setTimeout(r, 1200));
+    console.log(`Email sent to Approvers and Suppliers for PR ${id}`);
+    
+    setPrs(prev => prev.map(p => p.id === id ? { 
+      ...p, 
+      status: 'APPROVED', 
+      emailSentAt: new Date().toISOString() 
+    } : p));
+    
+    setProcessingId(null);
   };
 
-  const validateItemAppropriateness = (skuId: string, proposedQty: number) => {
-    const sku = skus.find(s => s.id === skuId);
-    if (!sku) return { status: 'Unknown', color: 'text-slate-400', months: 0 };
+  const handleReject = async (id: string) => {
+    setProcessingId(id);
+    setActionLabel('Rejecting & Notifying Procurement...');
     
-    const currentStock = calculateTotalStock(sku);
-    const totalStock = currentStock + proposedQty;
-    const monthsLast = totalStock / sku.ams;
+    // BR 2: Simulate sending email to Procurement Team
+    await new Promise(r => setTimeout(r, 1000));
+    console.log(`Email sent to Procurement Team for rejection of PR ${id}`);
+
+    setPrs(prev => prev.map(p => p.id === id ? { 
+      ...p, 
+      status: 'REJECTED'
+    } : p));
     
-    if (monthsLast < 3) return { status: 'Too Little', color: 'text-red-600', months: monthsLast, icon: TrendingDown };
-    if (monthsLast > 6) return { status: 'Too Much', color: 'text-amber-600', months: monthsLast, icon: TrendingUp };
-    return { status: 'Suitable', color: 'text-green-600', months: monthsLast, icon: Target };
+    setProcessingId(null);
   };
 
-  const handleStatusChange = (id: string, newStatus: 'APPROVED' | 'REJECTED') => {
-    setPrs(prev => prev.map(pr => pr.id === id ? { ...pr, status: newStatus } : pr));
-    if (newStatus === 'APPROVED') {
-      alert("Purchase Requisition Approved! Automatic email notifications sent to suppliers (BR5).");
-    }
+  const downloadPackingList = (pr: PurchaseRequisition, supplierId: string) => {
+    const supplier = MOCK_SUPPLIERS.find(s => s.id === supplierId);
+    const supplierItems = pr.items.filter(i => i.supplierId === supplierId);
+    
+    const content = `
+APPROVED PACKING LIST - FIAMMA GROUP
+------------------------------------
+PR ID: ${pr.id}
+Date: ${new Date().toLocaleDateString()}
+Supplier: ${supplier?.name} (${supplier?.email})
+Container Type: ${pr.containerType}
+
+ITEMS:
+${supplierItems.map(i => `- ${i.model} (${i.skuId}): ${i.qty} units`).join('\n')}
+
+Utilization: Vol ${pr.utilizationCbm.toFixed(1)}%, Weight ${pr.utilizationWeight.toFixed(1)}%
+------------------------------------
+STATUS: SYSTEM APPROVED
+    `;
+    
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${pr.id}_PackingList_${supplier?.name.replace(/\s+/g, '_')}.txt`;
+    a.click();
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      {/* AI Reasoning Panel */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-fit">
-        <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+    <div className="max-w-5xl mx-auto space-y-6">
+      <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="bg-blue-500 p-2.5 rounded-xl shadow-lg shadow-blue-500/20">
-              <Sparkles size={20} />
+            <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg shadow-blue-100">
+              <UserCheck size={24} />
             </div>
             <div>
-              <h3 className="font-bold text-lg">Procurement Advisor</h3>
-              <p className="text-xs text-slate-400">Strategic Insights</p>
+              <h3 className="text-xl font-bold text-slate-800 tracking-tight">Queue and Approvals</h3>
+              <p className="text-sm text-slate-500 font-medium">Manage and process pending purchase requisitions</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <span className="block text-xs font-bold text-slate-400 uppercase">Queue Status</span>
+              <span className="text-sm font-bold text-blue-600">{prs.filter(p => p.status === 'DRAFT').length} Pending Requests</span>
             </div>
           </div>
         </div>
         
-        <div className="p-8 flex-1">
-          <div className="text-slate-700 leading-relaxed whitespace-pre-wrap text-sm font-medium bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
-            {mockInsights}
-          </div>
-        </div>
-
-        <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4">
-           <button className="flex-1 bg-white border border-slate-200 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-100 transition-all flex items-center justify-center gap-2 shadow-sm">
-             <MessageSquare size={18} />
-             View Analysis
-           </button>
-        </div>
-      </div>
-
-      {/* Approval Workflow Panel */}
-      <div className="space-y-6">
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-slate-800">Pending Approvals</h3>
-            <span className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-full">{prs.filter(p => p.status === 'DRAFT').length} Waiting</span>
-          </div>
-          
-          <div className="space-y-6">
-            {prs.length === 0 ? (
-              <div className="text-center py-16 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                <Clock className="mx-auto text-slate-300 mb-4" size={32} />
-                <p className="text-slate-500 font-bold">Queue Empty</p>
-                <p className="text-xs text-slate-400 mt-1">Generate a PR to begin the approval process.</p>
-              </div>
-            ) : (
-              prs.map(pr => (
-                <div key={pr.id} className={`group border rounded-3xl transition-all overflow-hidden ${
-                  pr.status === 'APPROVED' ? 'border-green-200 bg-green-50/20' : 
-                  pr.status === 'REJECTED' ? 'border-red-200 bg-red-50/20 opacity-70' :
-                  'border-blue-100 bg-white hover:border-blue-300 hover:shadow-lg'
-                }`}>
-                  {/* PR Header */}
-                  <div className="p-6 cursor-pointer" onClick={() => setExpandedPr(expandedPr === pr.id ? null : pr.id)}>
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${pr.status === 'DRAFT' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-600'}`}>
-                          <CalendarDays size={20} />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-slate-900">{pr.id}</h4>
-                          <p className="text-xs text-slate-500 font-medium">{pr.title}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest ${
+        <div className="space-y-4">
+          {prs.length === 0 ? (
+            <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+              <Clock className="mx-auto text-slate-300 mb-4" size={48} />
+              <p className="text-slate-500 font-bold text-lg">Requisition Queue Empty</p>
+              <p className="text-slate-400 text-sm mt-1">New container plans will appear here for review.</p>
+            </div>
+          ) : (
+            prs.map(pr => (
+              <div key={pr.id} className={`group border rounded-3xl transition-all overflow-hidden ${
+                pr.status === 'APPROVED' ? 'border-green-200 bg-green-50/10' : 
+                pr.status === 'REJECTED' ? 'border-red-200 bg-red-50/30' :
+                'border-slate-100 bg-white hover:border-blue-200 hover:shadow-xl hover:shadow-blue-500/5'
+              }`}>
+                <div 
+                  className="p-6 cursor-pointer flex items-center justify-between" 
+                  onClick={() => setExpandedPr(expandedPr === pr.id ? null : pr.id)}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className={`p-3 rounded-2xl ${
+                      pr.status === 'APPROVED' ? 'bg-green-100 text-green-600' : 
+                      pr.status === 'REJECTED' ? 'bg-red-100 text-red-600' :
+                      'bg-blue-50 text-blue-600'
+                    }`}>
+                      <CalendarDays size={20} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-slate-900 text-lg">{pr.id}</h4>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest ${
                           pr.status === 'APPROVED' ? 'bg-green-600 text-white' : 
                           pr.status === 'REJECTED' ? 'bg-red-600 text-white' :
-                          'bg-blue-600 text-white'
+                          'bg-blue-600 text-white shadow-lg shadow-blue-100'
                         }`}>
                           {pr.status}
                         </span>
-                        {expandedPr === pr.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                       </div>
+                      <p className="text-xs text-slate-500 font-medium">{pr.title}</p>
                     </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-6">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Utilization</p>
+                      <p className="text-sm font-bold text-slate-700">{pr.utilizationCbm.toFixed(0)}% CBM</p>
+                    </div>
+                    {expandedPr === pr.id ? <ChevronUp size={20} className="text-slate-400" /> : <ChevronDown size={20} className="text-slate-400" />}
+                  </div>
+                </div>
 
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="text-center">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Items</p>
-                        <p className="text-sm font-bold">{pr.items.length} SKU</p>
+                {expandedPr === pr.id && (
+                  <div className="px-6 pb-8 animate-in slide-in-from-top-4 duration-300">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-6 border-t border-slate-50">
+                      <div>
+                        <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Line Items Breakdown</h5>
+                        <div className="space-y-3">
+                          {pr.items.map((item, idx) => (
+                            <div key={idx} className="flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-slate-100">
+                              <div>
+                                <p className="text-sm font-bold text-slate-800">{item.model}</p>
+                                <p className="text-[10px] text-slate-500">{item.skuId}</p>
+                              </div>
+                              <span className="font-bold text-blue-600 text-sm">{item.qty} units</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div className="text-center border-x border-slate-100">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Vol Util.</p>
-                        <p className={`text-sm font-bold ${pr.utilizationCbm > 95 ? 'text-amber-600' : 'text-green-600'}`}>{pr.utilizationCbm.toFixed(0)}%</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Container</p>
-                        <p className="text-sm font-bold truncate px-2">{pr.containerType}</p>
+
+                      <div className="flex flex-col justify-between">
+                        <div>
+                          <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Action Summary</h5>
+                          {pr.status === 'DRAFT' && processingId !== pr.id && (
+                            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 mb-6">
+                              <div className="flex items-start gap-3">
+                                <AlertCircle size={18} className="text-blue-600 mt-0.5" />
+                                <p className="text-xs text-blue-800 leading-relaxed">
+                                  Review the container utilization and line items before processing. 
+                                  Approved requests will be dispatched to suppliers immediately.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {processingId === pr.id ? (
+                            <div className="bg-slate-900 text-white rounded-2xl p-8 flex flex-col items-center text-center">
+                              <Loader2 className="animate-spin mb-4" size={32} />
+                              <h4 className="font-bold mb-1">{actionLabel}</h4>
+                              <p className="text-slate-400 text-[10px] uppercase tracking-widest">Simulating Email Protocol...</p>
+                            </div>
+                          ) : pr.status === 'DRAFT' ? (
+                            <div className="space-y-3">
+                              <button 
+                                onClick={() => handleApprove(pr.id)}
+                                className="w-full bg-green-600 text-white font-bold py-4 rounded-2xl hover:bg-green-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-200 active:scale-95"
+                              >
+                                <CheckCircle size={18} />
+                                Approve and Email (BR 2)
+                              </button>
+                              <button 
+                                onClick={() => handleReject(pr.id)}
+                                className="w-full bg-white border border-red-200 text-red-600 font-bold py-4 rounded-2xl hover:bg-red-50 transition-all flex items-center justify-center gap-2 active:scale-95"
+                              >
+                                <XCircle size={18} />
+                                Reject
+                              </button>
+                            </div>
+                          ) : pr.status === 'APPROVED' ? (
+                            <div className="space-y-4">
+                              <div className="bg-green-50 border border-green-100 rounded-2xl p-5 flex items-start gap-4">
+                                <div className="bg-green-100 p-2 rounded-xl text-green-600">
+                                  <Mail size={20} />
+                                </div>
+                                <div>
+                                  <h5 className="font-bold text-green-900 text-sm">Notifications Sent</h5>
+                                  <p className="text-[10px] text-green-700 font-medium">Email dispatched to Approvers & Suppliers on {new Date(pr.emailSentAt || '').toLocaleString()}.</p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3">
+                                {Array.from(new Set(pr.items.map(i => i.supplierId))).map(sId => {
+                                  const supplier = MOCK_SUPPLIERS.find(s => s.id === sId);
+                                  return (
+                                    <button 
+                                      key={sId}
+                                      onClick={() => downloadPackingList(pr, sId)}
+                                      className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl hover:border-blue-400 group transition-all"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <FileText size={18} className="text-slate-400 group-hover:text-blue-500" />
+                                        <div className="text-left">
+                                          <p className="text-[10px] font-bold text-slate-900">{supplier?.name}</p>
+                                          <p className="text-[9px] text-slate-500 uppercase tracking-tight">Download Packing List</p>
+                                        </div>
+                                      </div>
+                                      <Download size={14} className="text-slate-300 group-hover:text-blue-500" />
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-red-50 border border-red-100 rounded-2xl p-6 flex flex-col items-center text-center">
+                              <XCircle className="text-red-500 mb-2" size={32} />
+                              <h5 className="font-bold text-red-900">Request Rejected</h5>
+                              <p className="text-xs text-red-700 mt-2">Notification has been sent to the Procurement Team for revisions.</p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-
-                  {/* Validation Details */}
-                  {expandedPr === pr.id && (
-                    <div className="px-6 pb-6 animate-in slide-in-from-top-2 duration-300">
-                      <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4 mb-6">
-                        <h5 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                          <Target size={14} className="text-blue-500" />
-                          Procurement Appropriateness Validation
-                        </h5>
-                        
-                        <div className="space-y-4">
-                          {pr.items.map(item => {
-                            const val = validateItemAppropriateness(item.skuId, item.qty);
-                            const ValIcon = val.icon;
-                            return (
-                              <div key={item.skuId} className="flex items-center justify-between py-2 border-b border-slate-200 last:border-0">
-                                <div className="flex flex-col">
-                                  <span className="text-xs font-bold text-slate-800">{item.model}</span>
-                                  <span className="text-[10px] text-slate-400">Proposed: {item.qty} units</span>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                  <div className="text-right">
-                                    <p className="text-[10px] text-slate-400 font-medium">Stock Longevity</p>
-                                    <p className="text-xs font-bold">{val.months.toFixed(1)} Months</p>
-                                  </div>
-                                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${val.color} bg-white shadow-sm`}>
-                                      {ValIcon && <ValIcon size={12} />}
-                                      <span className="text-[10px] font-bold">{val.status}</span>
-                                    </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        <div className="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-xl flex gap-3">
-                          <Clock size={16} className="text-amber-600 shrink-0" />
-                          <p className="text-[10px] text-amber-800 leading-tight">
-                            <strong>Note:</strong> Stock levels above 6 months flagged as overstock risks. Levels below 3 months require urgent restocking.
-                          </p>
-                        </div>
-                      </div>
-
-                      {pr.status === 'DRAFT' && (
-                        <div className="flex gap-4">
-                          <button 
-                            onClick={() => handleStatusChange(pr.id, 'APPROVED')}
-                            className="flex-1 bg-green-600 text-white font-bold py-3.5 rounded-2xl hover:bg-green-700 hover:shadow-lg hover:shadow-green-200 transition-all flex items-center justify-center gap-2 active:scale-95"
-                          >
-                            <CheckCircle size={18} />
-                            Approve Plan
-                          </button>
-                          <button 
-                            onClick={() => handleStatusChange(pr.id, 'REJECTED')}
-                            className="flex-1 bg-white border border-red-200 text-red-600 font-bold py-3.5 rounded-2xl hover:bg-red-50 transition-all active:scale-95"
-                          >
-                            <XCircle size={18} className="inline mr-1" />
-                            Reject
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      
+      <div className="bg-slate-900 p-6 rounded-3xl text-white flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="bg-blue-600 p-2 rounded-xl">
+            <CheckCircle size={20} />
+          </div>
+          <div>
+            <h4 className="font-bold text-sm">Approver Accountability</h4>
+            <p className="text-xs text-slate-400">All actions are logged and synchronized with the supplier communication API.</p>
           </div>
         </div>
-
-        <div className="bg-gradient-to-br from-indigo-600 to-blue-700 p-8 rounded-3xl text-white shadow-xl relative overflow-hidden">
-           <div className="absolute top-0 right-0 p-4 opacity-10">
-              <TrendingUp size={120} />
-           </div>
-           <h3 className="text-xl font-bold mb-2">Strategic Insight</h3>
-           <p className="text-blue-100 text-sm mb-6 leading-relaxed">
-             Based on historical data, prioritize high-velocity items to maintain optimal service levels.
-           </p>
-           <button className="bg-white text-blue-700 font-bold px-8 py-3.5 rounded-2xl hover:bg-blue-50 transition-all shadow-lg active:scale-95 flex items-center gap-2">
-              Review Recommendations
-           </button>
+        <div className="hidden md:flex gap-2">
+           <span className="text-[9px] font-bold border border-slate-700 px-2 py-1 rounded uppercase tracking-widest text-slate-500">System Log: Active</span>
         </div>
       </div>
     </div>
