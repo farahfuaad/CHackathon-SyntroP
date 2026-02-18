@@ -141,8 +141,8 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
           <div className="p-8">
              <div className="flex justify-between items-center mb-8">
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Container Asset Master</h3>
-                <p className="text-sm text-slate-500">Configure global shipping vessel capacities (CBM/Weight).</p>
+                <h3 className="text-xl font-bold text-slate-900">Container Reference Specs</h3>
+                <p className="text-sm text-slate-500">Used for global shipping vessel capacities (CBM/Weight).</p>
               </div>
               <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all">
                 <Plus size={18} /> New Container Type
@@ -203,7 +203,7 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
             <div className="flex justify-between items-center mb-8">
               <div>
                 <h3 className="text-xl font-bold text-slate-900">SKU Reference Specs</h3>
-                <p className="text-sm text-slate-500">Essential dimensions for container utilization algorithms (BR4).</p>
+                <p className="text-sm text-slate-500">Dimensions for container utilization.</p>
               </div>
             </div>
 
