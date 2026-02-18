@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
@@ -12,7 +11,9 @@ import {
   FileCheck,
   Database,
   Bookmark,
-  ClipboardClock
+  ClipboardClock,
+  PencilRuler,
+  ListStart
 } from 'lucide-react';
 import { SKU, WarehouseCategory, PurchaseRequisition, BUParameters, Supplier, ContainerType } from './types';
 import { MOCK_SKUS, MOCK_SUPPLIERS, CONTAINER_TYPES } from './constants';
@@ -67,9 +68,9 @@ const App: React.FC = () => {
         activeTab === id ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-600 hover:bg-blue-50'
       }`}
     >
-      <Icon size={20} />
-      <span className="font-medium whitespace-nowrap">{label}</span>
-      {activeTab === id && <ChevronRight size={16} className="ml-auto" />}
+      <Icon size={20} className="flex-shrink-0" />
+      <span className="font-medium whitespace-nowrap flex-1">{label}</span>
+      {activeTab === id && <ChevronRight size={16} className="flex-shrink-0" />}
     </button>
   );
 
@@ -78,7 +79,7 @@ const App: React.FC = () => {
       <aside className="w-64 bg-white border-r border-slate-200 p-6 flex flex-col gap-8 fixed h-full">
         <div className="flex items-center gap-2 px-2">
           <div className="bg-blue-600 p-2 rounded-lg text-white">
-            <BrainCircuit size={24} />
+            <ListStart size={24} />
           </div>
           <h1 className="font-bold text-xl text-slate-800 tracking-tight">Syntro-P</h1>
         </div>
@@ -88,7 +89,7 @@ const App: React.FC = () => {
           <SidebarItem id="planning" label="Procurement Sheet" icon={Package} />
           <SidebarItem id="container" label="Container Planning" icon={Truck} />
           <SidebarItem id="approvals" label="Queue and Approvals" icon={ClipboardClock} />
-          <SidebarItem id="spec" label="Specification Update" icon={Package} />
+          <SidebarItem id="spec" label="Specification Update" icon={PencilRuler} />
         </nav>
       </aside>
 
