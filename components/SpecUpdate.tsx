@@ -24,6 +24,8 @@ interface Props {
 const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, containers, setContainers }) => {
   const [activeSubTab, setActiveSubTab] = useState<'suppliers' | 'containers' | 'sku-specs'>('suppliers');
   const [saveStatus, setSaveStatus] = useState<boolean>(false);
+  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+  const [isContainerModalOpen, setIsContainerModalOpen] = useState(false);
 
   const handleSaveNotification = () => {
     setSaveStatus(true);
@@ -36,6 +38,52 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
 
   const updateContainer = (index: number, field: keyof ContainerType, value: any) => {
     setContainers(prev => prev.map((c, i) => i === index ? { ...c, [field]: value } : c));
+  };
+
+  const Modal = ({ isOpen, onClose, title, children }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <h3 className="text-xl font-bold text-slate-900">{title}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <Trash2 size={20} /> {/* Or an X icon */}
+          </button>
+        </div>
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  );
+  };
+
+  const handleAddSupplier = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const newSupplier: Supplier = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: formData.get('name') as string,
+      email: formData.get('email') as string,
+      standardLeadTime: parseInt(formData.get('leadTime') as string) || 0,
+      rating: 0
+    };
+    setSuppliers([...suppliers, newSupplier]);
+    setIsSupplierModalOpen(false);
+    handleSaveNotification();
+  };
+
+  //Helper to add Container
+  const handleAddContainer = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const newContainer: ContainerType = {
+      name: formData.get('name') as string,
+      capacityCbm: parseFloat(formData.get('cbm') as string) || 0,
+      maxWeightKg: parseFloat(formData.get('kg') as string) || 0,
+    };
+    setContainers([...containers, newContainer]);
+    setIsContainerModalOpen(false);
+    handleSaveNotification();
   };
 
   const updateSkuSpec = (id: string, field: 'l' | 'w' | 'h' | 'weight', value: number) => {
@@ -81,7 +129,9 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                 <h3 className="text-xl font-bold text-slate-900">Supplier Reference Master</h3>
                 <p className="text-sm text-slate-500">Update lead times and contact details for vendor portfolio.</p>
               </div>
-              <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all">
+              <button 
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all"
+              onClick={() => setIsSupplierModalOpen(true)}>
                 <Plus size={18} /> Add Supplier
               </button>
             </div>
@@ -144,7 +194,10 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                 <h3 className="text-xl font-bold text-slate-900">Container Reference Specs</h3>
                 <p className="text-sm text-slate-500">Used for global shipping vessel capacities (CBM/Weight).</p>
               </div>
-              <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all">
+              <button 
+                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all"
+                onClick={() => setIsContainerModalOpen(true)}
+              >
                 <Plus size={18} /> New Container Type
               </button>
             </div>
@@ -278,6 +331,57 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
             {saveStatus ? 'Changes Applied' : 'Save Changes'}
           </button>
         </div>
+        {/* Supplier Modal */}
+        <Modal 
+        isOpen={isSupplierModalOpen} 
+        onClose={() => setIsSupplierModalOpen(false)} 
+        title="Add New Supplier"
+        >
+  <form onSubmit={handleAddSupplier} className="space-y-4">
+    <div>
+      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Vendor Name</label>
+      <input name="name" required className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+    <div>
+      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Email</label>
+      <input name="email" type="email" required className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+    <div>
+      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Lead Time (Days)</label>
+      <input name="leadTime" type="number" required className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+    <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-all">
+      Create Supplier
+    </button>
+  </form>
+</Modal>
+
+{/* Container Modal */}
+<Modal 
+  isOpen={isContainerModalOpen} 
+  onClose={() => setIsContainerModalOpen(false)} 
+  title="Add New Container"
+>
+  <form onSubmit={handleAddContainer} className="space-y-4">
+    <div>
+      <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Container Name (e.g. 40ft HC)</label>
+      <input name="name" required className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+    </div>
+    <div className="grid grid-cols-2 gap-4">
+      <div>
+        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Max CBM</label>
+        <input name="cbm" type="number" step="0.01" required className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      <div>
+        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Max KG</label>
+        <input name="kg" type="number" step="0.01" required className="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+    </div>
+    <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition-all">
+      Create Container
+    </button>
+  </form>
+</Modal>
       </div>
     </div>
   );
