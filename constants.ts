@@ -4,6 +4,7 @@ import { SKU, WarehouseCategory, Supplier, ContainerType } from './types';
 export const MOCK_SKUS: SKU[] = [
   {
     id: 'TAE11-005T',
+    supplierId: 'S1',
     model: 'RDS-DC-18 (CB)',
     description: 'Ducting System High Performance',
     category: 'Ducting',
@@ -27,6 +28,7 @@ export const MOCK_SKUS: SKU[] = [
   },
   {
     id: 'TAE11-M310/XR',
+    supplierId: 'S1',
     model: 'SIROCCO XR-BL (WM)',
     description: 'Hood Cooker SIROCCO with Cap',
     category: 'Hood Cooker',
@@ -50,6 +52,7 @@ export const MOCK_SKUS: SKU[] = [
   },
   {
     id: 'TAE11-M323/XR',
+    supplierId: 'S2',
     model: 'BOXLINE XR (WM)',
     description: 'BOXLINE XR - No Project',
     category: 'Hood Cooker',
@@ -84,20 +87,3 @@ export const CONTAINER_TYPES: ContainerType[] = [
   { name: "40' Standard", capacityCbm: 67.5, maxWeightKg: 28500 },
   { name: "40' High Cube", capacityCbm: 76.1, maxWeightKg: 28500 }
 ];
-
-export const Modal = ({ isOpen, onClose, title, children }: any) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-          <h3 className="text-xl font-bold text-slate-900">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <Trash2 size={20} /> {/* Or an X icon */}
-          </button>
-        </div>
-        <div className="p-6">{children}</div>
-      </div>
-    </div>
-  );
-};
