@@ -128,10 +128,17 @@ const App: React.FC = () => {
             </>
           )}
 
-          {activeTab === 'planning' && <ProcurementSheet skus={skus} onAddToPlanning={handleAddToPlanning} />}
+          {activeTab === 'planning' && (
+            <ProcurementSheet
+              skus={skus}
+              suppliers={suppliers}
+              onAddToPlanning={handleAddToPlanning}
+            />
+          )}
           {activeTab === 'container' && (
             <ContainerPlanner 
               skus={skus} 
+              suppliers={suppliers}
               containerTypes={containers}
               selectedSkus={plannedSkus} 
               setSelectedSkus={setPlannedSkus}

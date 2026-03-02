@@ -1,19 +1,24 @@
 
 import React, { useState } from 'react';
-import { SKU, ContainerType, PurchaseRequisition } from '../types';
+import { SKU, Supplier, ContainerType, PurchaseRequisition } from '../types';
 import { Box, Calculator, FileDown, Trash2, Loader2 } from 'lucide-react';
 
 interface Props {
   skus: SKU[];
+  suppliers: Supplier[];
   containerTypes: ContainerType[];
   selectedSkus: { skuId: string, qty: number }[];
   setSelectedSkus: React.Dispatch<React.SetStateAction<{ skuId: string, qty: number }[]>>;
   onGeneratePr: (pr: PurchaseRequisition) => void;
 }
 
-const ContainerPlanner: React.FC<Props> = ({ skus, containerTypes, selectedSkus, setSelectedSkus, onGeneratePr }) => {
+const ContainerPlanner: React.FC<Props> = ({ skus, suppliers, containerTypes, selectedSkus, setSelectedSkus, onGeneratePr }) => {
   const [containerType, setContainerType] = useState<ContainerType>(containerTypes[0]);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const getSupplierName = (supplierId: string) => {
+    return suppliers.find((s) => s.id === supplierId)?.name || supplierId;
+  };
 
   const addSku = (skuId: string) => {
     if (selectedSkus.find(s => s.skuId === skuId)) return;
@@ -93,7 +98,9 @@ const ContainerPlanner: React.FC<Props> = ({ skus, containerTypes, selectedSkus,
               >
                 <option value="" disabled>Add SKU to PR...</option>
                 {skus.filter(s => !s.isSlowMoving).map(s => (
-                  <option key={s.id} value={s.id}>{s.model}</option>
+                  <option key={s.id} value={s.id}>
+                    {s.model} - {getSupplierName(s.supplierId)}
+                  </option>
                 ))}
               </select>
             </div>
@@ -119,6 +126,9 @@ const ContainerPlanner: React.FC<Props> = ({ skus, containerTypes, selectedSkus,
                   </div>
                   <div className="flex-1">
                     <h4 className="text-sm font-bold text-slate-800">{sku.model}</h4>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-tighter">
+                      Supplier: {getSupplierName(sku.supplierId)} •
+                    </p>
                     <p className="text-[10px] text-slate-500 uppercase tracking-tighter">
                       Dim: {sku.dimensions.l}x{sku.dimensions.w}x{sku.dimensions.h}cm • {sku.weight}kg
                     </p>

@@ -1,14 +1,17 @@
 
-import React from 'react';
-import { SKU, WarehouseCategory } from '../types';
-import { Info, AlertCircle, ShoppingCart } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { SKU, Supplier, WarehouseCategory } from '../types';
+import { Info, ShoppingCart } from 'lucide-react';
 
 interface Props {
   skus: SKU[];
+  suppliers: Supplier[];
   onAddToPlanning: (skuId: string) => void;
 }
 
-const ProcurementSheet: React.FC<Props> = ({ skus, onAddToPlanning }) => {
+const ProcurementSheet: React.FC<Props> = ({ skus, suppliers, onAddToPlanning }) => {
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>('all');
+
   const calculateTotalStock = (sku: SKU) => {
     // Exclude Project and Corporate
     const excluded = [WarehouseCategory.PROJECT, WarehouseCategory.CORPORATE];
@@ -18,6 +21,11 @@ const ProcurementSheet: React.FC<Props> = ({ skus, onAddToPlanning }) => {
     }, 0);
     return inHand + sku.incoming;
   };
+
+  const filteredSkus = useMemo(() => {
+    if (selectedSupplierId === 'all') return skus;
+    return skus.filter((sku) => sku.supplierId === selectedSupplierId);
+  }, [selectedSupplierId, skus]);
 
 return (
   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
@@ -34,9 +42,21 @@ return (
       </div>
 
       <div className="flex items-center gap-2">
-        <button className="px-4 py-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all flex items-center">
-          <i className="fa-solid fa-filter mr-2"></i> Filter
-        </button>
+        <div className="px-3 py-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl flex items-center gap-2">
+          <i className="fa-solid fa-filter"></i>
+          <select
+            value={selectedSupplierId}
+            onChange={(e) => setSelectedSupplierId(e.target.value)}
+            className="bg-transparent outline-none"
+          >
+            <option value="all">All Suppliers</option>
+            {suppliers.map((supplier) => (
+              <option key={supplier.id} value={supplier.id}>
+                {supplier.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <button 
           onClick={() => {/* Trigger your Add Logic */}} 
           className="px-4 py-2 text-sm font-bold text-white rounded-xl shadow-md hover:opacity-90 active:scale-95 transition-all flex items-center" 
@@ -63,7 +83,7 @@ return (
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {skus.map((sku) => {
+          {filteredSkus.map((sku) => {
             // Logic for Calculations
             const total = calculateTotalStock(sku);
             const stockLast = (total / sku.ams).toFixed(1);
