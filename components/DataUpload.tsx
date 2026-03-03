@@ -10,12 +10,16 @@ import {
   Package, 
   Truck,
   ArrowRight,
-  Loader2
+  Loader2,
+  Building2
 } from 'lucide-react';
 import { buildProductPreview, uploadProductCsv } from '@/src/services/productDetailService';
 import { buildSupplierPreview, uploadSupplierCsv } from '@/src/services/supplierService';
+import { buildContainerPreview, uploadContainerCsv } from '@/src/services/containerService';
+import { buildInventoryPreview, uploadInventoryCsv } from '@/src/services/inventoryService';
+import { buildWarehousePreview, uploadWarehouseCsv } from '@/src/services/warehouseService';
 
-type UploadType = 'product' | 'supplier' | 'container' | 'inventory';
+type UploadType = 'product' | 'supplier' | 'container' | 'inventory' | 'warehouse';
 
 interface UploadHistoryEntry {
   id: string;
@@ -62,6 +66,13 @@ const UPLOAD_OPTIONS: UploadOption[] = [
     description: 'Bulk update current stock levels across warehouses.', 
     icon: Database,
     color: 'purple'
+  },
+  {
+    id: 'warehouse',
+    label: 'Warehouse Master',
+    description: 'Update warehouse_id, warehouse_name, sku_id, unit_qty.',
+    icon: Building2,
+    color: 'indigo'
   },
 ];
 
@@ -133,6 +144,24 @@ const DataUpload: React.FC = () => {
       return;
     }
 
+    if (selectedType === 'container') {
+      const preview = await buildContainerPreview(selectedFile);
+      setPreviewData(preview);
+      return;
+    }
+
+    if (selectedType === 'inventory') {
+      const preview = await buildInventoryPreview(selectedFile);
+      setPreviewData(preview);
+      return;
+    }
+
+    if (selectedType === 'warehouse') {
+      const preview = await buildWarehousePreview(selectedFile);
+      setPreviewData(preview);
+      return;
+    }
+
     const mockPreview = [
       { col1: 'Data Point A', col2: 'Value 1', col3: 'Status OK' },
       { col1: 'Data Point B', col2: 'Value 2', col3: 'Status OK' },
@@ -183,6 +212,51 @@ const DataUpload: React.FC = () => {
 
       if (selectedType === 'supplier') {
         const result = await uploadSupplierCsv(file);
+        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+
+        const isSuccess = result.failed === 0;
+        setUploadStatus(isSuccess ? 'success' : 'error');
+
+        if (!isSuccess) {
+          setUploadError(`Uploaded ${result.success}/${result.total}. First error: ${result.errors[0] || 'Unknown error'}`);
+        }
+
+        addHistoryEntry(isSuccess ? 'success' : 'error');
+        return;
+      }
+
+      if (selectedType === 'container') {
+        const result = await uploadContainerCsv(file);
+        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+
+        const isSuccess = result.failed === 0;
+        setUploadStatus(isSuccess ? 'success' : 'error');
+
+        if (!isSuccess) {
+          setUploadError(`Uploaded ${result.success}/${result.total}. First error: ${result.errors[0] || 'Unknown error'}`);
+        }
+
+        addHistoryEntry(isSuccess ? 'success' : 'error');
+        return;
+      }
+
+      if (selectedType === 'inventory') {
+        const result = await uploadInventoryCsv(file);
+        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+
+        const isSuccess = result.failed === 0;
+        setUploadStatus(isSuccess ? 'success' : 'error');
+
+        if (!isSuccess) {
+          setUploadError(`Uploaded ${result.success}/${result.total}. First error: ${result.errors[0] || 'Unknown error'}`);
+        }
+
+        addHistoryEntry(isSuccess ? 'success' : 'error');
+        return;
+      }
+
+      if (selectedType === 'warehouse') {
+        const result = await uploadWarehouseCsv(file);
         setUploadSummary({ inserted: result.inserted, updated: result.updated });
 
         const isSuccess = result.failed === 0;

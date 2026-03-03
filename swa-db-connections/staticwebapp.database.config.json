@@ -20,12 +20,13 @@
     "host": {
       "mode": "production",
       "cors": {
+        "allow-credentials": false,
         "origins": [
           "http://localhost:3000",
+          "http://localhost:5173",
           "http://127.0.0.1:3000",
-          "http://localhost:4281"
-        ],
-        "allow-credentials": false
+          "http://127.0.0.1:5173"
+        ]
       },
       "authentication": {
         "provider": "StaticWebApps"
@@ -91,8 +92,13 @@
       "source": "dbo.warehouse",
       "permissions": [
         {
-          "actions": ["*"],
-          "role": "anonymous"
+          "role": "anonymous",
+          "actions": [
+            { "action": "read" },
+            { "action": "create" },
+            { "action": "update" },
+            { "action": "delete" }
+          ]
         }
       ]
     },
