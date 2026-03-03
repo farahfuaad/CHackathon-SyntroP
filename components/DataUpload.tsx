@@ -13,6 +13,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { buildProductPreview, uploadProductCsv } from '@/src/services/productDetailService';
+import { buildSupplierPreview, uploadSupplierCsv } from '@/src/services/supplierService';
 
 type UploadType = 'product' | 'supplier' | 'container' | 'inventory';
 
@@ -126,6 +127,12 @@ const DataUpload: React.FC = () => {
       return;
     }
 
+    if (selectedType === 'supplier') {
+      const preview = await buildSupplierPreview(selectedFile);
+      setPreviewData(preview);
+      return;
+    }
+
     const mockPreview = [
       { col1: 'Data Point A', col2: 'Value 1', col3: 'Status OK' },
       { col1: 'Data Point B', col2: 'Value 2', col3: 'Status OK' },
@@ -174,7 +181,22 @@ const DataUpload: React.FC = () => {
         return;
       }
 
-      // Mock branch for non-product uploads
+      if (selectedType === 'supplier') {
+        const result = await uploadSupplierCsv(file);
+        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+
+        const isSuccess = result.failed === 0;
+        setUploadStatus(isSuccess ? 'success' : 'error');
+
+        if (!isSuccess) {
+          setUploadError(`Uploaded ${result.success}/${result.total}. First error: ${result.errors[0] || 'Unknown error'}`);
+        }
+
+        addHistoryEntry(isSuccess ? 'success' : 'error');
+        return;
+      }
+
+      // Mock branch for other uploads
       setTimeout(() => {
         setUploadStatus('success');
         addHistoryEntry('success');

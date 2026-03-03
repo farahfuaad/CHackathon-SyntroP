@@ -16,6 +16,10 @@ type ProductListingRow = {
   sku_model_name: string;
   category: number;
   supplier_id?: string | number;
+  box_length_cm?: number | null;
+  box_width_cm?: number | null;
+  box_height_cm?: number | null;
+  box_weight_kg?: number | null;
 };
 
 type InventoryStockRow = {
@@ -363,4 +367,31 @@ export async function fetchInventoryListingBySku(): Promise<InventorySkuListing[
 function toNum(v: unknown) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+export type ProductSpecListing = {
+  skuId: string;
+  modelName: string;
+  categoryLabel: string;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+  weightKg: number;
+};
+
+export async function fetchProductSpecListing(): Promise<ProductSpecListing[]> {
+  const rows = await apiGetListAll<ProductListingRow>(ENTITY_PRODUCT);
+
+  return rows
+    .map((r) => ({
+      skuId: (r.sku_id || "").trim(),
+      modelName: r.sku_model_name || "",
+      categoryLabel: CATEGORY_ID_TO_LABEL[r.category] || "Uncategorized",
+      lengthCm: toNum(r.box_length_cm),
+      widthCm: toNum(r.box_width_cm),
+      heightCm: toNum(r.box_height_cm),
+      weightKg: toNum(r.box_weight_kg),
+    }))
+    .filter((r) => !!r.skuId)
+    .sort((a, b) => a.skuId.localeCompare(b.skuId));
 }

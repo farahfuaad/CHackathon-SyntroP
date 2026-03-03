@@ -1,6 +1,9 @@
-
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { SKU, Supplier, ContainerType } from '../types';
+import {
+  fetchProductSpecListing,
+  ProductSpecListing
+} from '../src/services/productDetailService';
 import { 
   Users, 
   Container, 
@@ -26,6 +29,42 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
   const [saveStatus, setSaveStatus] = useState<boolean>(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isContainerModalOpen, setIsContainerModalOpen] = useState(false);
+  const [skuSpecRows, setSkuSpecRows] = useState<ProductSpecListing[]>([]);
+  const [skuSpecPage, setSkuSpecPage] = useState<number>(1);
+  const SKU_PAGE_SIZE = 20;
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await fetchProductSpecListing();
+        if (mounted) setSkuSpecRows(data);
+      } catch (err) {
+        console.error('Failed to fetch product spec listing:', err);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const skuSpecTotalPages = Math.max(1, Math.ceil(skuSpecRows.length / SKU_PAGE_SIZE));
+
+  useEffect(() => {
+    if (skuSpecPage > skuSpecTotalPages) setSkuSpecPage(skuSpecTotalPages);
+  }, [skuSpecPage, skuSpecTotalPages]);
+
+  const visibleSkuSpecRows = useMemo(() => {
+    const start = (skuSpecPage - 1) * SKU_PAGE_SIZE;
+    return skuSpecRows.slice(start, start + SKU_PAGE_SIZE);
+  }, [skuSpecRows, skuSpecPage]);
+
+  const updateDbSkuSpecLocal = (
+    skuId: string,
+    field: 'lengthCm' | 'widthCm' | 'heightCm' | 'weightKg',
+    value: number
+  ) => {
+    const safe = Number.isFinite(value) ? value : 0;
+    setSkuSpecRows((prev) => prev.map((r) => (r.skuId === skuId ? { ...r, [field]: safe } : r)));
+  };
 
   const handleSaveNotification = () => {
     setSaveStatus(true);
@@ -84,16 +123,6 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
     setContainers([...containers, newContainer]);
     setIsContainerModalOpen(false);
     handleSaveNotification();
-  };
-
-  const updateSkuSpec = (id: string, field: 'l' | 'w' | 'h' | 'weight', value: number) => {
-    setSkus(prev => prev.map(s => {
-      if (s.id === id) {
-        if (field === 'weight') return { ...s, weight: value };
-        return { ...s, dimensions: { ...s.dimensions, [field]: value } };
-      }
-      return s;
-    }));
   };
 
   return (
@@ -261,59 +290,81 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-slate-50/50 border-b border-slate-100">
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Model / SKU</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Length (cm)</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Width (cm)</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Height (cm)</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Weight (kg)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {skus.map(s => (
-                    <tr key={s.id} className="hover:bg-slate-50/30 transition-colors">
-                      <td className="px-6 py-5">
-                        <span className="font-bold text-slate-900 block">{s.model}</span>
-                        <span className="text-[10px] text-slate-400 uppercase">{s.category}</span>
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <input 
-                          type="number" 
-                          value={s.dimensions.l} 
-                          onChange={(e) => updateSkuSpec(s.id, 'l', parseFloat(e.target.value))}
-                          className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <input 
-                          type="number" 
-                          value={s.dimensions.w} 
-                          onChange={(e) => updateSkuSpec(s.id, 'w', parseFloat(e.target.value))}
-                          className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <input 
-                          type="number" 
-                          value={s.dimensions.h} 
-                          onChange={(e) => updateSkuSpec(s.id, 'h', parseFloat(e.target.value))}
-                          className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <input 
-                          type="number" 
-                          value={s.weight} 
-                          onChange={(e) => updateSkuSpec(s.id, 'weight', parseFloat(e.target.value))}
-                          className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </td>
+              <div className="max-h-[700px] overflow-y-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Model / SKU</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Length (cm)</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Width (cm)</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Height (cm)</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Weight (kg)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {visibleSkuSpecRows.map((s) => (
+                      <tr key={s.skuId} className="hover:bg-slate-50/30 transition-colors">
+                        <td className="px-6 py-5">
+                          <span className="font-bold text-slate-900 block">{s.modelName || '-'}</span>
+                          <span className="text-[10px] text-slate-400 uppercase">{s.categoryLabel}</span>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <input
+                            type="number"
+                            value={s.lengthCm}
+                            onChange={(e) => updateDbSkuSpecLocal(s.skuId, 'lengthCm', parseFloat(e.target.value))}
+                            className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <input
+                            type="number"
+                            value={s.widthCm}
+                            onChange={(e) => updateDbSkuSpecLocal(s.skuId, 'widthCm', parseFloat(e.target.value))}
+                            className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <input
+                            type="number"
+                            value={s.heightCm}
+                            onChange={(e) => updateDbSkuSpecLocal(s.skuId, 'heightCm', parseFloat(e.target.value))}
+                            className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <input
+                            type="number"
+                            value={s.weightKg}
+                            onChange={(e) => updateDbSkuSpecLocal(s.skuId, 'weightKg', parseFloat(e.target.value))}
+                            className="w-20 text-center bg-white border border-slate-200 rounded-lg py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setSkuSpecPage((p) => Math.max(1, p - 1))}
+                disabled={skuSpecPage <= 1}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <span className="text-xs text-slate-600 font-semibold">
+                Page {skuSpecPage} / {skuSpecTotalPages}
+              </span>
+              <button
+                onClick={() => setSkuSpecPage((p) => Math.min(skuSpecTotalPages, p + 1))}
+                disabled={skuSpecPage >= skuSpecTotalPages}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
             </div>
           </div>
         )}
