@@ -11,15 +11,17 @@ import {
   Truck,
   ArrowRight,
   Loader2,
-  Building2
+  Building2,
+  BarChart3
 } from 'lucide-react';
 import { buildProductPreview, uploadProductCsv } from '@/src/services/productDetailService';
 import { buildSupplierPreview, uploadSupplierCsv } from '@/src/services/supplierService';
 import { buildContainerPreview, uploadContainerCsv } from '@/src/services/containerService';
 import { buildInventoryPreview, uploadInventoryCsv } from '@/src/services/inventoryService';
 import { buildWarehousePreview, uploadWarehouseCsv } from '@/src/services/warehouseService';
+import { buildSalesPreview, uploadSalesCsv } from '@/src/services/salesService';
 
-type UploadType = 'product' | 'supplier' | 'container' | 'inventory' | 'warehouse';
+type UploadType = 'product' | 'supplier' | 'container' | 'inventory' | 'warehouse' | 'sales';
 
 interface UploadHistoryEntry {
   id: string;
@@ -73,6 +75,13 @@ const UPLOAD_OPTIONS: UploadOption[] = [
     description: 'Update warehouse_id, warehouse_name, sku_id, unit_qty.',
     icon: Building2,
     color: 'indigo'
+  },
+  {
+    id: 'sales',
+    label: 'Sales History',
+    description: 'Upload SKU_ID, Month, Units_Sold (maps to dbo.sales).',
+    icon: BarChart3,
+    color: 'rose'
   },
 ];
 
@@ -158,6 +167,12 @@ const DataUpload: React.FC = () => {
 
     if (selectedType === 'warehouse') {
       const preview = await buildWarehousePreview(selectedFile);
+      setPreviewData(preview);
+      return;
+    }
+
+    if (selectedType === 'sales') {
+      const preview = await buildSalesPreview(selectedFile);
       setPreviewData(preview);
       return;
     }
@@ -257,6 +272,21 @@ const DataUpload: React.FC = () => {
 
       if (selectedType === 'warehouse') {
         const result = await uploadWarehouseCsv(file);
+        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+
+        const isSuccess = result.failed === 0;
+        setUploadStatus(isSuccess ? 'success' : 'error');
+
+        if (!isSuccess) {
+          setUploadError(`Uploaded ${result.success}/${result.total}. First error: ${result.errors[0] || 'Unknown error'}`);
+        }
+
+        addHistoryEntry(isSuccess ? 'success' : 'error');
+        return;
+      }
+
+      if (selectedType === 'sales') {
+        const result = await uploadSalesCsv(file);
         setUploadSummary({ inserted: result.inserted, updated: result.updated });
 
         const isSuccess = result.failed === 0;
