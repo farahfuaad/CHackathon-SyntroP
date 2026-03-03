@@ -13,7 +13,8 @@ import {
   Bookmark,
   ClipboardClock,
   PencilRuler,
-  ListStart
+  ListStart,
+  Upload
 } from 'lucide-react';
 import { SKU, WarehouseCategory, PurchaseRequisition, BUParameters, Supplier, ContainerType } from './types';
 import { MOCK_SKUS, MOCK_SUPPLIERS, CONTAINER_TYPES } from './constants';
@@ -22,6 +23,7 @@ import RiskDashboard from './components/RiskDashboard';
 import ContainerPlanner from './components/ContainerPlanner';
 import QueueApprovals from './components/QueueApprovals';
 import SpecUpdate from './components/SpecUpdate';
+import DataUpload from './components/DataUpload';
 
 // Internal default requirements for AI context
 const DEFAULT_BU_PARAMS: BUParameters = {
@@ -32,12 +34,13 @@ const DEFAULT_BU_PARAMS: BUParameters = {
 };
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'container' | 'approvals' | 'spec'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'container' | 'approvals' | 'spec' | 'data'>('dashboard');
   const [skus, setSkus] = useState<SKU[]>(MOCK_SKUS);
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
   const [containers, setContainers] = useState<ContainerType[]>(CONTAINER_TYPES);
   const [plannedSkus, setPlannedSkus] = useState<{ skuId: string, qty: number }[]>([]);
   const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
+  const [uploadedData, setUploadedData] = useState<any>(null);
   
   const calculateTotalStock = (sku: SKU) => {
     const excluded = [WarehouseCategory.PROJECT, WarehouseCategory.CORPORATE];
@@ -90,6 +93,7 @@ const App: React.FC = () => {
           <SidebarItem id="container" label="Container Planning" icon={Truck} />
           <SidebarItem id="approvals" label="Queue and Approvals" icon={ClipboardClock} />
           <SidebarItem id="spec" label="Specification Update" icon={PencilRuler} />
+          <SidebarItem id="data" label="Data Upload" icon={Upload} />
         </nav>
       </aside>
 
@@ -102,8 +106,9 @@ const App: React.FC = () => {
               {activeTab === 'container' && 'Automated Container Planning'}
               {activeTab === 'approvals' && 'Queue and Approvals'}
               {activeTab === 'spec' && 'Specification Update'}
+              {activeTab === 'data' && 'Data Upload'}
             </h2>
-            <p className="text-slate-500">Intelligent Supply Chain Management System</p>
+            <p className="text-slate-500">Intelligent Procurement Planning Agent</p>
           </div>
           <div className="flex gap-4">
             <button className="bg-white border border-slate-200 p-2 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors">
@@ -162,6 +167,9 @@ const App: React.FC = () => {
               containers={containers} 
               setContainers={setContainers} 
             />
+          )}
+          {activeTab === 'data' && (
+            <DataUpload />
           )}
         </section>
       </main>
