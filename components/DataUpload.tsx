@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, 
   FileText, 
@@ -75,6 +75,38 @@ const DataUpload: React.FC = () => {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSummary, setUploadSummary] = useState<{ inserted: number; updated: number } | null>(null);
 
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      const raw = window.localStorage.getItem('upload_history');
+      if (raw) setHistory(JSON.parse(raw));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      window.localStorage.setItem('upload_history', JSON.stringify(history));
+    } catch {
+      // ignore
+    }
+  }, [history]);
+
+  const addHistoryEntry = (status: 'success' | 'error') => {
+    if (!file) return;
+    const newEntry: UploadHistoryEntry = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      fileName: file.name,
+      type: UPLOAD_OPTIONS.find(o => o.id === selectedType)?.label || selectedType,
+      date: new Date().toLocaleString(),
+      status,
+      size: `${(file.size / 1024).toFixed(1)} KB`,
+    };
+    setHistory(prev => [newEntry, ...prev]);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
@@ -133,37 +165,24 @@ const DataUpload: React.FC = () => {
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
+
         if (!isSuccess) {
           setUploadError(`Uploaded ${result.success}/${result.total}. First error: ${result.errors[0] || 'Unknown error'}`);
         }
 
-        const newEntry: UploadHistoryEntry = {
-          id: Math.random().toString(36).substr(2, 9),
-          fileName: file.name,
-          type: UPLOAD_OPTIONS.find(o => o.id === selectedType)?.label || selectedType,
-          date: new Date().toLocaleString(),
-          status: isSuccess ? 'success' : 'error',
-          size: `${(file.size / 1024).toFixed(1)} KB`,
-        };
-        setHistory(prev => [newEntry, ...prev]);
+        addHistoryEntry(isSuccess ? 'success' : 'error');
         return;
       }
 
+      // Mock branch for non-product uploads
       setTimeout(() => {
         setUploadStatus('success');
-        const newEntry: UploadHistoryEntry = {
-          id: Math.random().toString(36).substr(2, 9),
-          fileName: file.name,
-          type: UPLOAD_OPTIONS.find(o => o.id === selectedType)?.label || selectedType,
-          date: new Date().toLocaleString(),
-          status: 'success',
-          size: `${(file.size / 1024).toFixed(1)} KB`
-        };
-        setHistory(prev => [newEntry, ...prev]);
+        addHistoryEntry('success');
       }, 2000);
     } catch (e: any) {
       setUploadStatus('error');
       setUploadError(e?.message || 'Upload failed');
+      addHistoryEntry('error');
     }
   };
 
