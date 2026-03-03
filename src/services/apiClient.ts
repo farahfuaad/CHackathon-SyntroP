@@ -1,4 +1,6 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/rest").replace(/\/$/, "");
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL || "/data-api/rest"
+).replace(/\/$/, "");
 
 type DABListResponse<T> = { value: T[]; nextLink?: string };
 type QueryParams = Record<string, string | number>;
