@@ -73,6 +73,7 @@ const DataUpload: React.FC = () => {
   const [history, setHistory] = useState<UploadHistoryEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSummary, setUploadSummary] = useState<{ inserted: number; updated: number } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -85,6 +86,7 @@ const DataUpload: React.FC = () => {
     setFile(selectedFile);
     setUploadStatus('idle');
     setUploadError(null);
+    setUploadSummary(null);
 
     if (selectedType === 'product') {
       const preview = await buildProductPreview(selectedFile);
@@ -122,10 +124,12 @@ const DataUpload: React.FC = () => {
     if (!file) return;
     setUploadStatus('uploading');
     setUploadError(null);
+    setUploadSummary(null);
 
     try {
       if (selectedType === 'product') {
         const result = await uploadProductCsv(file);
+        setUploadSummary({ inserted: result.inserted, updated: result.updated });
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
@@ -312,9 +316,16 @@ const DataUpload: React.FC = () => {
                 )}
                 {uploadStatus === 'success' && (
                   <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 text-green-600 font-bold">
-                      <CheckCircle2 size={20} />
-                      Upload Successful
+                    <div className="flex flex-col items-start">
+                      <div className="flex items-center gap-2 text-green-600 font-bold">
+                        <CheckCircle2 size={20} />
+                        Upload Successful
+                      </div>
+                      {uploadSummary && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          Inserted: {uploadSummary.inserted} • Updated: {uploadSummary.updated}
+                        </div>
+                      )}
                     </div>
                     <button 
                       onClick={resetUpload}

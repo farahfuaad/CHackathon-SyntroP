@@ -19,13 +19,17 @@ const CATEGORY_MAP: Record<string, number> = {
 };
 
 // CSV uses ELBA/FABR/RUBI/VINO/HAUS
-const SUPPLIER_CODE_TO_NAME: Record<string, string> = {
-  ELBA: "1",
-  FABER: "2",
-  RUBI: "3",
-  VINO: "4",
-  HAUS: "5",
+
+const SUPPLIER_CODE_TO_ID: Record<string, number> = {
+  ELBA: 1,
+  FABR: 2,
+  RUBI: 3,
+  VINO: 4,
+  HAUS: 5,
 };
+
+const ENTITY_PRODUCT = "Product";
+const ENTITY_SUPPLIER = "Supplier";
 
 function normalize(v: string) {
   return (v || "").trim().toLowerCase();
@@ -84,24 +88,37 @@ function toInt(v: string, fallback = 0) {
   return Number.isFinite(n) ? Math.round(n) : fallback;
 }
 
-function resolveSupplierId(codeOrName: string, supplierMap: Map<string, number>): number {
-  const raw = (codeOrName || "").trim();
-  const mappedName = SUPPLIER_CODE_TO_NAME[raw.toUpperCase()] || raw;
-  const id = supplierMap.get(normalize(mappedName));
-  if (!id) throw new Error(`Unknown supplier: ${codeOrName}`);
+function resolveSupplierId(codeOrId: string, supplierIdSet: Set<number>): number {
+  const raw = (codeOrId || "").trim();
+  if (!raw) throw new Error("Missing Default_Supplier_ID");
+
+  // If CSV already numeric
+  if (/^\d+$/.test(raw)) {
+    const id = Number(raw);
+    if (!supplierIdSet.has(id)) throw new Error(`Unknown supplier id: ${id}`);
+    return id;
+  }
+
+  // If CSV uses code (ELBA/FABR/...)
+  const id = SUPPLIER_CODE_TO_ID[raw.toUpperCase()];
+  if (!id) throw new Error(`Unknown supplier code: ${raw}`);
+  if (!supplierIdSet.has(id)) throw new Error(`Supplier id not found in DB: ${id}`);
   return id;
 }
 
-function toProductPayload(row: CsvRow, supplierMap: Map<string, number>) {
+function toProductPayload(
+  row: CsvRow,
+  supplierIdSet: Set<number>
+) {
   const categoryKey = normalize(row["Category"]);
   const category = CATEGORY_MAP[categoryKey];
   if (!category) throw new Error(`Unknown category: ${row["Category"]}`);
 
   return {
-    sku_id: row["SKU_ID"],
+    sku_id: (row["SKU_ID"] || "").trim(),
     sku_model_name: row["SKU_Name"],
     category,
-    supplier_id: resolveSupplierId(row["Default_Supplier_ID"], supplierMap),
+    supplier_id: resolveSupplierId(row["Default_Supplier_ID"], supplierIdSet),
     box_length_cm: toInt(row["Unit_Length_cm"]),
     box_width_cm: toInt(row["Unit_Width_cm"]),
     box_height_cm: toInt(row["Unit_Height_cm"]),
@@ -125,12 +142,16 @@ export async function buildProductPreview(file: File) {
 export async function uploadProductCsv(file: File) {
   const [text, suppliers, products] = await Promise.all([
     file.text(),
-    apiGetList<SupplierRow>("supplier"),
-    apiGetList<ProductKeyRow>("Product"),
+    apiGetList<SupplierRow>(ENTITY_SUPPLIER),
+    apiGetList<ProductKeyRow>(ENTITY_PRODUCT),
   ]);
 
-  const supplierMap = new Map<string, number>();
-  suppliers.forEach((s) => supplierMap.set(normalize(s.supplier_name), s.supplier_id));
+  const supplierNameMap = new Map<string, number>();
+  const supplierIdSet = new Set<number>();
+  suppliers.forEach((s) => {
+    supplierNameMap.set(normalize(s.supplier_name), s.supplier_id);
+    supplierIdSet.add(s.supplier_id);
+  });
 
   const existingSkuSet = new Set(
     products.map((p) => (p.sku_id || "").trim()).filter(Boolean)
@@ -144,16 +165,16 @@ export async function uploadProductCsv(file: File) {
 
   for (const row of rows) {
     try {
-      const payload = toProductPayload(row, supplierMap);
-      const skuId = (payload.sku_id || "").trim();
+      const payload = toProductPayload(row, supplierIdSet);
+      const skuId = payload.sku_id;
       if (!skuId) throw new Error("Missing SKU_ID");
 
       if (existingSkuSet.has(skuId)) {
         const { sku_id, ...patchPayload } = payload;
-        await apiPatch("Product", "sku_id", skuId, patchPayload);
+        await apiPatch(ENTITY_PRODUCT, "sku_id", skuId, patchPayload);
         updated++;
       } else {
-        await apiPost("Product", payload);
+        await apiPost(ENTITY_PRODUCT, payload);
         existingSkuSet.add(skuId);
         inserted++;
       }

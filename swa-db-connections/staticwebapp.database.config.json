@@ -87,6 +87,15 @@
         }
       ]
     },
+    "Warehouse": {
+      "source": "dbo.warehouse",
+      "permissions": [
+        {
+          "actions": ["*"],
+          "role": "anonymous"
+        }
+      ]
+    },
     "ProcurementPlan": {
       "source": "dbo.ProcurementPlan",
       "permissions": [
