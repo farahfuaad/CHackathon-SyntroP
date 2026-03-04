@@ -1,22 +1,19 @@
 import React, { useState } from 'react';
-import { 
-  LayoutDashboard, 
-  Package, 
-  Truck, 
-  AlertTriangle, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Package,
+  Truck,
+  AlertTriangle,
+  Settings,
   ChevronRight,
   TrendingUp,
-  BrainCircuit,
-  FileCheck,
-  Database,
-  Bookmark,
   ClipboardClock,
   PencilRuler,
   ListStart,
-  Upload
+  Upload,
+  LogOut
 } from 'lucide-react';
-import { SKU, WarehouseCategory, PurchaseRequisition, BUParameters, Supplier, ContainerType } from './types';
+import { SKU, WarehouseCategory, PurchaseRequisition, Supplier, ContainerType } from './types';
 import { MOCK_SKUS, MOCK_SUPPLIERS, CONTAINER_TYPES } from './constants';
 import ProcurementSheet from './components/ProcurementSheet';
 import RiskDashboard from './components/RiskDashboard';
@@ -24,24 +21,34 @@ import ContainerPlanner from './components/ContainerPlanner';
 import QueueApprovals from './components/QueueApprovals';
 import SpecUpdate from './components/SpecUpdate';
 import DataUpload from './components/DataUpload';
+import SignIn from './components/SignIn';
+import { authenticateUserByDb, type AuthenticatedUser } from './src/services/userAccessService';
 
-// Internal default requirements for AI context
-const DEFAULT_BU_PARAMS: BUParameters = {
-  leadGrowthTarget: 15,
-  seasonalMultiplier: 1.2,
-  safetyStockBufferWeeks: 2,
-  promotionalActivity: "Standard operational cycle with focus on growth."
+// local type to fix missing BUParameters export
+type BUParameters = {
+  leadGrowthTarget: number;
+  seasonalMultiplier: number;
+  safetyStockBufferWeeks: number;
+  promotionalActivity: string;
 };
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'container' | 'approvals' | 'spec' | 'data'>('dashboard');
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [skus, setSkus] = useState<SKU[]>(MOCK_SKUS);
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
   const [containers, setContainers] = useState<ContainerType[]>(CONTAINER_TYPES);
   const [plannedSkus, setPlannedSkus] = useState<{ skuId: string, qty: number }[]>([]);
   const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
   const [uploadedData, setUploadedData] = useState<any>(null);
-  
+
+  const [buParams, setBuParams] = useState<BUParameters>({
+    leadGrowthTarget: 0,
+    seasonalMultiplier: 1,
+    safetyStockBufferWeeks: 0,
+    promotionalActivity: 'None',
+  });
+
   const calculateTotalStock = (sku: SKU) => {
     const excluded = [WarehouseCategory.PROJECT, WarehouseCategory.CORPORATE];
     const inHand = Object.entries(sku.inStock).reduce((acc, [cat, val]) => {
@@ -63,6 +70,23 @@ const App: React.FC = () => {
     setPlannedSkus([]); 
     setActiveTab('approvals'); 
   };
+
+  const handleSignIn = async (email: string, password: string) => {
+    const user = await authenticateUserByDb(email, password);
+    if (!user) {
+      throw new Error('Invalid email or password.');
+    }
+    setCurrentUser(user);
+  };
+
+  const handleSignOut = () => {
+    setCurrentUser(null);
+    setActiveTab('dashboard');
+  };
+
+  if (!currentUser) {
+    return <SignIn onSignIn={handleSignIn} />;
+  }
 
   const SidebarItem = ({ id, label, icon: Icon }: { id: any, label: string, icon: any }) => (
     <button
@@ -110,10 +134,20 @@ const App: React.FC = () => {
             </h2>
             <p className="text-slate-500">Intelligent Procurement Planning Agent</p>
           </div>
-          <div className="flex gap-4">
+
+          <div className="flex gap-4 items-center">
+            <button
+              onClick={handleSignOut}
+              className="bg-white border border-slate-200 px-4 py-2 rounded-lg text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all flex items-center gap-2 font-semibold text-sm"
+            >
+              <LogOut size={16} />
+              Sign Out
+            </button>
+
             <button className="bg-white border border-slate-200 p-2 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors">
               <Settings size={20} />
             </button>
+
             <div className="h-10 w-10 rounded-full bg-slate-200 border-2 border-white shadow-sm overflow-hidden">
               <img src="https://picsum.photos/40" alt="Avatar" />
             </div>
@@ -126,7 +160,6 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <StatCard title="Total SKUs" value={skus.length} icon={Package} trend="+2%" color="blue" />
                 <StatCard title="Critical Low Stock" value={skus.filter(s => calculateTotalStock(s) / s.ams < 1).length} icon={AlertTriangle} trend="-1" color="red" />
-                <StatCard title="Target Growth" value={`+${DEFAULT_BU_PARAMS.leadGrowthTarget}%`} icon={TrendingUp} trend="Forecasted" color="green" />
                 <StatCard title="Active Shipments" value={skus.reduce((a, b) => a + (b.incoming > 0 ? 1 : 0), 0)} icon={Truck} trend="+3" color="green" />
               </div>
               <RiskDashboard skus={skus} />
@@ -151,11 +184,11 @@ const App: React.FC = () => {
             />
           )}
           {activeTab === 'approvals' && (
-            <QueueApprovals 
-              skus={skus} 
-              prs={prs} 
-              setPrs={setPrs} 
-              buParams={DEFAULT_BU_PARAMS}
+            <QueueApprovals
+              skus={skus}
+              prs={prs}
+              setPrs={setPrs}
+              buParams={buParams}
             />
           )}
           {activeTab === 'spec' && (

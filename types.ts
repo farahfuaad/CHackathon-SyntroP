@@ -34,13 +34,6 @@ export interface SKU {
   supplierId: string; // Linked to MOCK_SUPPLIERS
 }
 
-export interface BUParameters {
-  leadGrowthTarget: number; // Percentage growth expected in leads
-  seasonalMultiplier: number; // Factor for upcoming seasonal events
-  safetyStockBufferWeeks: number; // Extra weeks of inventory to hold
-  promotionalActivity: string; // Description of upcoming marketing campaigns
-}
-
 export interface Supplier {
   id: string;
   name: string;
