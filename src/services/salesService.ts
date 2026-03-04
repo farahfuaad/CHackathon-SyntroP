@@ -78,7 +78,9 @@ async function parseCsv(file: File): Promise<Record<string, unknown>[]> {
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return [];
 
-  const headers = lines[0].split(',').map((h) => h.trim());
+  // remove UTF-8 BOM if present
+  const firstLine = lines[0].replace(/^\uFEFF/, '');
+  const headers = firstLine.split(',').map((h) => h.trim());
 
   return lines.slice(1).map((line) => {
     const cols = line.split(',');
@@ -252,8 +254,30 @@ async function postSalesChunkWithRetry(
   throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} failed: ${lastError}`);
 }
 
-export async function uploadSalesCsv(file: File): Promise<UploadResult> {
+import { apiPostBatched } from "./apiClient";
+
+type BulkChunkResult = { inserted?: number; updated?: number; failed?: number; errors?: string[] };
+const SALES_BULK_ENTITY = import.meta.env.VITE_SALES_BULK_ENTITY || "sales_bulk_upsert";
+
+export async function uploadSalesRowsFast(
+  rows: SalesRow[],
+  onProgress?: (done: number, total: number) => void
+) {
+  return apiPostBatched<SalesRow, BulkChunkResult>(
+    SALES_BULK_ENTITY,
+    rows,
+    (batch) => ({ rows: batch }),
+    { batchSize: 1000, concurrency: 3, onProgress }
+  );
+}
+
+export async function uploadSalesCsv(
+  file: File,
+  onProgress?: (done: number, total: number) => void
+): Promise<UploadResult> {
   const records = await parseFileToRecords(file);
+  const totalRows = records.length;
+  onProgress?.(0, totalRows);
 
   const valid: SalesRow[] = [];
   const errors: string[] = [];
@@ -261,30 +285,52 @@ export async function uploadSalesCsv(file: File): Promise<UploadResult> {
   records.forEach((r, idx) => {
     const mapped = mapRecordToSalesRow(r);
     if (!mapped.row) {
-      errors.push(`Row ${idx + 2}: ${mapped.error ?? 'Invalid row'}`);
+      errors.push(`Row ${idx + 2}: ${mapped.error ?? "Invalid row"}`);
       return;
     }
     valid.push(mapped.row);
   });
 
+  const invalidCount = errors.length;
+
   if (valid.length === 0) {
-    return {
-      total: records.length,
-      success: 0,
-      failed: errors.length,
-      inserted: 0,
-      updated: 0,
-      errors,
-    };
+    onProgress?.(totalRows, totalRows);
+    return { total: totalRows, success: 0, failed: invalidCount, inserted: 0, updated: 0, errors };
+  }
+
+  // Try fast bulk path first
+  try {
+    const batchResults = await uploadSalesRowsFast(valid, onProgress);
+
+    let inserted = 0;
+    let updated = 0;
+    let failed = invalidCount;
+    const apiErrors: string[] = [...errors];
+
+    for (const r of batchResults) {
+      inserted += Number(r?.inserted ?? 0);
+      updated += Number(r?.updated ?? 0);
+      failed += Number(r?.failed ?? 0);
+      if (Array.isArray(r?.errors)) apiErrors.push(...r.errors);
+    }
+
+    const success = Math.max(0, valid.length - (failed - invalidCount));
+    onProgress?.(totalRows, totalRows);
+
+    return { total: totalRows, success, failed, inserted, updated, errors: apiErrors };
+  } catch {
+    // fallback to existing chunk+retry path
   }
 
   const chunks = chunkArray(valid, CHUNK_SIZE);
 
   let success = 0;
-  let failed = errors.length;
+  let failed = invalidCount;
   let inserted = 0;
   let updated = 0;
   const apiErrors: string[] = [];
+
+  let processedValid = 0;
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -307,11 +353,14 @@ export async function uploadSalesCsv(file: File): Promise<UploadResult> {
     } catch (e: any) {
       failed += chunk.length;
       apiErrors.push(e?.message || `Chunk ${i + 1}/${chunks.length} failed`);
+    } finally {
+      processedValid += chunk.length;
+      onProgress?.(Math.min(totalRows, invalidCount + processedValid), totalRows);
     }
   }
 
   return {
-    total: records.length,
+    total: totalRows,
     success,
     failed,
     inserted,

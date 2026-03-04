@@ -132,3 +132,55 @@ export async function apiDelete(entity: string, pkName: string, pkValue: string 
   });
   if (!res.ok) await readError(res, "DELETE", entity);
 }
+
+export type BatchUploadOptions = {
+  batchSize?: number;      // default 1000
+  concurrency?: number;    // default 3
+  onProgress?: (done: number, total: number) => void;
+};
+
+export async function apiPostRaw<T>(entity: string, payload: unknown): Promise<T> {
+  const res = await fetch(buildUrl(entity), {
+    method: "POST",
+    headers: defaultHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) await readError(res, "POST", entity);
+  if (res.status === 204) return null as T;
+  return (await res.json()) as T;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+export async function apiPostBatched<TItem, TResult = unknown>(
+  entity: string,
+  items: TItem[],
+  toPayload: (batch: TItem[]) => unknown,
+  opts: BatchUploadOptions = {}
+): Promise<TResult[]> {
+  const batchSize = Math.max(1, opts.batchSize ?? 1000);
+  const concurrency = Math.max(1, opts.concurrency ?? 3);
+
+  const batches = chunkArray(items, batchSize);
+  const results: TResult[] = [];
+  let done = 0;
+  let next = 0;
+
+  async function worker() {
+    while (next < batches.length) {
+      const current = next++;
+      const payload = toPayload(batches[current]);
+      const res = await apiPostRaw<TResult>(entity, payload);
+      results[current] = res;
+      done += batches[current].length;
+      opts.onProgress?.(done, items.length);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, batches.length) }, () => worker()));
+  return results;
+}
