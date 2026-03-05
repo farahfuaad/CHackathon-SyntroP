@@ -20,8 +20,9 @@ import { buildContainerPreview, uploadContainerCsv } from '@/src/services/contai
 import { buildInventoryPreview, uploadInventoryCsv } from '@/src/services/inventoryService';
 import { buildWarehousePreview, uploadWarehouseCsv } from '@/src/services/warehouseService';
 import { buildSalesPreview, uploadSalesCsv } from '@/src/services/salesService';
+import { buildComplaintPreview, uploadComplaintCsv } from '@/src/services/complaintService';
 
-type UploadType = 'product' | 'supplier' | 'container' | 'inventory' | 'warehouse' | 'sales';
+type UploadType = 'product' | 'supplier' | 'container' | 'inventory' | 'warehouse' | 'sales' | 'complaint';
 
 interface UploadHistoryEntry {
   id: string;
@@ -83,6 +84,13 @@ const UPLOAD_OPTIONS: UploadOption[] = [
     icon: BarChart3,
     color: 'rose'
   },
+  {
+    id: 'complaint',
+    label: 'Complaint Issues',
+    description: 'Upload SKU complaints into dbo.ComplaintIssue.',
+    icon: AlertCircle,
+    color: 'red'
+  },
 ];
 
 const DataUpload: React.FC = () => {
@@ -90,11 +98,17 @@ const DataUpload: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
-  const [previewData, setPreviewData] = useState<any[]>([]);
   const [history, setHistory] = useState<UploadHistoryEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSummary, setUploadSummary] = useState<{ inserted: number; updated: number } | null>(null);
+  const [uploadSummary, setUploadSummary] = useState<{
+    inserted: number;
+    updated: number;
+    success: number;
+    total: number;
+    failed: number;
+  } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
 
   useEffect(() => {
     try {
@@ -140,49 +154,48 @@ const DataUpload: React.FC = () => {
     setUploadStatus('idle');
     setUploadError(null);
     setUploadSummary(null);
+    setUploadProgress({ done: 0, total: 0 });
 
     if (selectedType === 'product') {
-      const preview = await buildProductPreview(selectedFile);
-      setPreviewData(preview);
+      await buildProductPreview(selectedFile);
       return;
     }
 
     if (selectedType === 'supplier') {
-      const preview = await buildSupplierPreview(selectedFile);
-      setPreviewData(preview);
+      await buildSupplierPreview(selectedFile);
       return;
     }
 
     if (selectedType === 'container') {
-      const preview = await buildContainerPreview(selectedFile);
-      setPreviewData(preview);
+      await buildContainerPreview(selectedFile);
       return;
     }
 
     if (selectedType === 'inventory') {
-      const preview = await buildInventoryPreview(selectedFile);
-      setPreviewData(preview);
+      await buildInventoryPreview(selectedFile);
       return;
     }
 
     if (selectedType === 'warehouse') {
-      const preview = await buildWarehousePreview(selectedFile);
-      setPreviewData(preview);
+      await buildWarehousePreview(selectedFile);
       return;
     }
 
     if (selectedType === 'sales') {
-      const preview = await buildSalesPreview(selectedFile);
-      setPreviewData(preview);
+      await buildSalesPreview(selectedFile);
       return;
     }
 
-    const mockPreview = [
-      { col1: 'Data Point A', col2: 'Value 1', col3: 'Status OK' },
-      { col1: 'Data Point B', col2: 'Value 2', col3: 'Status OK' },
-      { col1: 'Data Point C', col2: 'Value 3', col3: 'Review Needed' },
-    ];
-    setPreviewData(mockPreview);
+    if (selectedType === 'complaint') {
+      await buildComplaintPreview(selectedFile);
+      return;
+    }
+
+    // Mock branch for other uploads
+    setTimeout(() => {
+      setUploadStatus('success');
+      addHistoryEntry('success');
+    }, 2000);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -208,11 +221,18 @@ const DataUpload: React.FC = () => {
     setUploadStatus('uploading');
     setUploadError(null);
     setUploadSummary(null);
+    setUploadProgress({ done: 0, total: 0 });
 
     try {
       if (selectedType === 'product') {
         const result = await uploadProductCsv(file);
-        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+        setUploadSummary({
+          inserted: result.inserted,
+          updated: result.updated,
+          success: result.success,
+          total: result.total,
+          failed: result.failed,
+        });
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
@@ -227,7 +247,13 @@ const DataUpload: React.FC = () => {
 
       if (selectedType === 'supplier') {
         const result = await uploadSupplierCsv(file);
-        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+        setUploadSummary({
+          inserted: result.inserted,
+          updated: result.updated,
+          success: result.success,
+          total: result.total,
+          failed: result.failed,
+        });
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
@@ -242,7 +268,13 @@ const DataUpload: React.FC = () => {
 
       if (selectedType === 'container') {
         const result = await uploadContainerCsv(file);
-        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+        setUploadSummary({
+          inserted: result.inserted,
+          updated: result.updated,
+          success: result.success,
+          total: result.total,
+          failed: result.failed,
+        });
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
@@ -257,7 +289,13 @@ const DataUpload: React.FC = () => {
 
       if (selectedType === 'inventory') {
         const result = await uploadInventoryCsv(file);
-        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+        setUploadSummary({
+          inserted: result.inserted,
+          updated: result.updated,
+          success: result.success,
+          total: result.total,
+          failed: result.failed,
+        });
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
@@ -272,7 +310,13 @@ const DataUpload: React.FC = () => {
 
       if (selectedType === 'warehouse') {
         const result = await uploadWarehouseCsv(file);
-        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+        setUploadSummary({
+          inserted: result.inserted,
+          updated: result.updated,
+          success: result.success,
+          total: result.total,
+          failed: result.failed,
+        });
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
@@ -286,8 +330,41 @@ const DataUpload: React.FC = () => {
       }
 
       if (selectedType === 'sales') {
-        const result = await uploadSalesCsv(file);
-        setUploadSummary({ inserted: result.inserted, updated: result.updated });
+        const result = await uploadSalesCsv(file, (done, total) => {
+          setUploadProgress({ done, total });
+        });
+
+        setUploadSummary({
+          inserted: result.inserted,
+          updated: result.updated,
+          success: result.success,
+          total: result.total,
+          failed: result.failed,
+        });
+
+        const isSuccess = result.failed === 0;
+        setUploadStatus(isSuccess ? 'success' : 'error');
+
+        if (!isSuccess) {
+          setUploadError(`Uploaded ${result.success}/${result.total}. First error: ${result.errors[0] || 'Unknown error'}`);
+        }
+
+        addHistoryEntry(isSuccess ? 'success' : 'error');
+        return;
+      }
+
+      if (selectedType === 'complaint') {
+        const result = await uploadComplaintCsv(file, (done, total) => {
+          setUploadProgress({ done, total });
+        });
+
+        setUploadSummary({
+          inserted: result.inserted,
+          updated: result.updated,
+          success: result.success,
+          total: result.total,
+          failed: result.failed,
+        });
 
         const isSuccess = result.failed === 0;
         setUploadStatus(isSuccess ? 'success' : 'error');
@@ -314,11 +391,22 @@ const DataUpload: React.FC = () => {
 
   const resetUpload = () => {
     setFile(null);
-    setPreviewData([]);
     setUploadStatus('idle');
     setUploadError(null);
+    setUploadSummary(null);
+    setUploadProgress({ done: 0, total: 0 });
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  const progressDone =
+    uploadStatus === 'uploading'
+      ? uploadProgress.done
+      : (uploadSummary?.success ?? 0);
+
+  const progressTotal =
+    uploadStatus === 'uploading'
+      ? uploadProgress.total
+      : (uploadSummary?.total ?? 0);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -412,33 +500,33 @@ const DataUpload: React.FC = () => {
               </div>
 
               <div className="p-6">
-                <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Data Preview (First 3 rows)</h5>
-                <div className="overflow-hidden border border-slate-100 rounded-xl">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 border-b border-slate-100">
-                      <tr>
-                        <th className="px-4 py-2 font-bold text-slate-600">Column 1</th>
-                        <th className="px-4 py-2 font-bold text-slate-600">Column 2</th>
-                        <th className="px-4 py-2 font-bold text-slate-600">Validation</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {previewData.map((row, i) => (
-                        <tr key={i}>
-                          <td className="px-4 py-2 text-slate-600">{row.col1}</td>
-                          <td className="px-4 py-2 text-slate-600">{row.col2}</td>
-                          <td className="px-4 py-2">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              row.col3.includes('OK') ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'
-                            }`}>
-                              {row.col3.includes('OK') ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-                              {row.col3}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Upload Progress</h5>
+                <div className="border border-slate-100 rounded-xl p-4 bg-white space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-700">Rows uploaded</span>
+                    <span className="text-sm font-bold text-slate-900">
+                      {progressDone} / {progressTotal}
+                    </span>
+                  </div>
+
+                  <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div
+                      className="h-2 bg-blue-600 transition-all duration-300"
+                      style={{
+                        width: progressTotal > 0 ? `${Math.round((progressDone / progressTotal) * 100)}%` : '0%',
+                      }}
+                    />
+                  </div>
+
+                  {uploadSummary && (
+                    <div className="text-xs text-slate-500">
+                      Inserted: {uploadSummary.inserted} • Updated: {uploadSummary.updated} • Failed: {uploadSummary.failed}
+                    </div>
+                  )}
+
+                  {uploadStatus === 'uploading' && (
+                    <div className="text-xs text-blue-600 font-semibold">Uploading...</div>
+                  )}
                 </div>
               </div>
 
@@ -468,7 +556,7 @@ const DataUpload: React.FC = () => {
                       </div>
                       {uploadSummary && (
                         <div className="text-xs text-slate-500 mt-1">
-                          Inserted: {uploadSummary.inserted} • Updated: {uploadSummary.updated}
+                          Uploaded: {uploadSummary.success}/{uploadSummary.total} • Inserted: {uploadSummary.inserted} • Updated: {uploadSummary.updated}
                         </div>
                       )}
                     </div>
@@ -488,72 +576,6 @@ const DataUpload: React.FC = () => {
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Upload History Table */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-          <div className="bg-slate-100 p-2 rounded-xl text-slate-600">
-            <FileText size={20} />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Upload History</h3>
-            <p className="text-sm text-slate-500">Track your recent master data updates.</p>
-          </div>
-        </div>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100">
-                <th className="px-8 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">File Name</th>
-                <th className="px-8 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data Type</th>
-                <th className="px-8 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Upload Date</th>
-                <th className="px-8 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Size</th>
-                <th className="px-8 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {history.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-8 py-12 text-center text-slate-400 text-sm italic">
-                    No upload history available.
-                  </td>
-                </tr>
-              ) : (
-                history.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-8 py-5">
-                      <div className="flex items-center gap-3">
-                        <FileText size={16} className="text-blue-500" />
-                        <span className="text-sm font-bold text-slate-900">{entry.fileName}</span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-5">
-                      <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
-                        {entry.type}
-                      </span>
-                    </td>
-                    <td className="px-8 py-5 text-sm text-slate-500">
-                      {entry.date}
-                    </td>
-                    <td className="px-8 py-5 text-sm text-slate-500">
-                      {entry.size}
-                    </td>
-                    <td className="px-8 py-5">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold ${
-                        entry.status === 'success' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
-                      }`}>
-                        {entry.status === 'success' ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
-                        {entry.status === 'success' ? 'SUCCESS' : 'FAILED'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

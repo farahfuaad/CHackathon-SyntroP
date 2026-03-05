@@ -1,4 +1,4 @@
-import { apiDelete, apiGetListAll, apiPost } from "./apiClient";
+import { apiGetListAll, apiPatch, apiPost } from "./apiClient";
 
 type CsvRow = Record<string, string>;
 
@@ -7,6 +7,7 @@ type ProductRow = { sku_id: string };
 type InventoryRow = {
   stock_id: number;
   sku_id?: string | null;
+  warehouse_id?: number | null;
 };
 
 type WarehouseRow = {
@@ -18,6 +19,11 @@ type WarehouseRow = {
 const ENTITY_PRODUCT = "Product";
 const ENTITY_INVENTORY = "InventoryStocks";
 const ENTITY_WAREHOUSE = "Warehouse";
+
+// Tunables for large uploads
+const SKU_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_INVENTORY_SKU_CONCURRENCY ?? 12));
+const INSERT_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_INVENTORY_INSERT_CONCURRENCY ?? 24));
+const MAX_ERROR_MESSAGES = Math.max(20, Number(import.meta.env.VITE_INVENTORY_MAX_ERRORS ?? 200));
 
 function splitCsvLine(line: string): string[] {
   const out: string[] = [];
@@ -125,7 +131,28 @@ export async function buildInventoryPreview(file: File) {
   });
 }
 
-export async function uploadInventoryCsv(file: File) {
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  if (!items.length) return;
+
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      await worker(items[idx], idx);
+    }
+  });
+
+  await Promise.all(workers);
+}
+
+export async function uploadInventoryCsv(
+  file: File,
+  onProgress?: (done: number, total: number) => void
+) {
   const text = await file.text();
   const csvRows = parseCsv(text);
 
@@ -137,7 +164,6 @@ export async function uploadInventoryCsv(file: File) {
 
   const productSkuSet = new Set(products.map((p) => key(p.sku_id || "")).filter(Boolean));
 
-  // maps for warehouse lookup
   const whIdBySkuAndCode = new Map<string, number>();
   const whIdByCode = new Map<string, number>();
 
@@ -150,16 +176,17 @@ export async function uploadInventoryCsv(file: File) {
     if (skuKey) whIdBySkuAndCode.set(pairKey(skuKey, codeKey), w.warehouse_id);
   });
 
-  // Existing stock ids grouped by sku
-  const stockIdsBySku = new Map<string, number[]>();
+  // existing key: sku_id + warehouse_id -> stock_id
+  const stockIdBySkuWh = new Map<string, number>();
   for (const s of existingStocks) {
     const skuKey = key(s.sku_id || "");
-    if (!skuKey) continue;
-    if (!stockIdsBySku.has(skuKey)) stockIdsBySku.set(skuKey, []);
-    stockIdsBySku.get(skuKey)!.push(s.stock_id);
+    const whKey = key(String(s.warehouse_id ?? ""));
+    if (!skuKey || !whKey) continue;
+
+    const k = pairKey(skuKey, whKey);
+    if (!stockIdBySkuWh.has(k)) stockIdBySkuWh.set(k, s.stock_id);
   }
 
-  // Validate + dedupe by sku+warehouse_code (last row wins)
   const rowsBySku = new Map<string, Map<string, { row: CsvRow; warehouseId: number }>>();
   let failed = 0;
   const errors: string[] = [];
@@ -174,17 +201,18 @@ export async function uploadInventoryCsv(file: File) {
 
     if (!skuRaw) {
       failed++;
-      errors.push(`Row ${line}: Missing sku_id`);
+      if (errors.length < MAX_ERROR_MESSAGES) errors.push(`Row ${line}: Missing sku_id`);
       return;
     }
     if (!whCodeRaw) {
       failed++;
-      errors.push(`Row ${line}: Missing warehouse_code`);
+      if (errors.length < MAX_ERROR_MESSAGES) errors.push(`Row ${line}: Missing warehouse_code`);
       return;
     }
     if (!productSkuSet.has(skuKey)) {
-      failed++;
-      errors.push(`Row ${line}: SKU not found (${skuRaw})`);
+      if (errors.length < MAX_ERROR_MESSAGES) {
+        errors.push(`Row ${line}: Skipped (SKU not found in Product: ${skuRaw})`);
+      }
       return;
     }
 
@@ -194,42 +222,56 @@ export async function uploadInventoryCsv(file: File) {
 
     if (!warehouseId) {
       failed++;
-      errors.push(`Row ${line}: Warehouse not found (${whCodeRaw})`);
+      if (errors.length < MAX_ERROR_MESSAGES) errors.push(`Row ${line}: Warehouse not found (${whCodeRaw})`);
       return;
     }
 
     if (!rowsBySku.has(skuKey)) rowsBySku.set(skuKey, new Map());
-    rowsBySku.get(skuKey)!.set(whCodeKey, { row: r, warehouseId });
+    rowsBySku.get(skuKey)!.set(whCodeKey, { row: r, warehouseId }); // last row wins
   });
 
   let inserted = 0;
   let updated = 0;
   let success = 0;
 
-  // overwrite by sku_id
-  for (const [skuKey, byWh] of rowsBySku.entries()) {
+  const skuJobs = Array.from(rowsBySku.entries());
+  let processed = 0;
+  onProgress?.(0, csvRows.length);
+
+  await runWithConcurrency(skuJobs, SKU_CONCURRENCY, async ([skuKey, byWh]) => {
     const skuRows = Array.from(byWh.values());
+
     try {
-      const existingIds = stockIdsBySku.get(skuKey) || [];
-      const hadExisting = existingIds.length > 0;
-
-      for (const stockId of existingIds) {
-        await apiDelete(ENTITY_INVENTORY, "stock_id", stockId);
-      }
-
-      for (const item of skuRows) {
+      await runWithConcurrency(skuRows, INSERT_CONCURRENCY, async (item) => {
         const payload = toInventoryPayload(item.row, item.warehouseId);
-        await apiPost(ENTITY_INVENTORY, payload as Record<string, unknown>);
-      }
+        const upsertKey = pairKey(skuKey, key(String(item.warehouseId)));
+        const existingStockId = stockIdBySkuWh.get(upsertKey);
 
-      success += skuRows.length;
-      if (hadExisting) updated += skuRows.length;
-      else inserted += skuRows.length;
+        if (existingStockId) {
+          await apiPatch(
+            ENTITY_INVENTORY,
+            "stock_id",
+            existingStockId,
+            payload as Record<string, unknown>
+          );
+          updated += 1;
+        } else {
+          await apiPost(ENTITY_INVENTORY, payload as Record<string, unknown>);
+          inserted += 1;
+        }
+
+        success += 1;
+      });
     } catch (e: any) {
       failed += skuRows.length;
-      errors.push(`${skuKey}: ${e?.message || "Upload failed"}`);
+      if (errors.length < MAX_ERROR_MESSAGES) {
+        errors.push(`${skuKey}: ${e?.message || "Upload failed"}`);
+      }
+    } finally {
+      processed += skuRows.length;
+      onProgress?.(Math.min(csvRows.length, failed + processed), csvRows.length);
     }
-  }
+  });
 
   return {
     total: csvRows.length,

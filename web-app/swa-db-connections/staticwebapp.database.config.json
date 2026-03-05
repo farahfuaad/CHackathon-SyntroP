@@ -128,6 +128,15 @@
           "role": "anonymous"
         }
       ]
+    },
+    "ComplaintIssue": {
+      "source": "dbo.ComplaintIssue",
+      "permissions": [
+        {
+          "actions": ["*"],
+          "role": "anonymous"
+        }
+      ]
     }
   }
 }
