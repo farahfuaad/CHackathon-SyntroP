@@ -9,6 +9,13 @@ type SupplierRow = {
   lead_time_days?: number | null;
 };
 
+export type SupplierListing = {
+  id: string;
+  name: string;
+  email: string;
+  leadTimeDays: number;
+};
+
 const ENTITY_SUPPLIER = "Supplier";
 
 function splitCsvLine(line: string): string[] {
@@ -147,4 +154,18 @@ export async function uploadSupplierCsv(file: File) {
     updated,
     errors,
   };
+}
+
+export async function fetchSupplierListing(): Promise<SupplierListing[]> {
+  const rows = await apiGetListAll<SupplierRow>(ENTITY_SUPPLIER);
+
+  return rows
+    .map((row) => ({
+      id: String(row.supplier_id),
+      name: (row.supplier_name || "").trim(),
+      email: (row.email || "").trim(),
+      leadTimeDays: Number(row.lead_time_days) || 0,
+    }))
+    .filter((row) => !!row.id && !!row.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

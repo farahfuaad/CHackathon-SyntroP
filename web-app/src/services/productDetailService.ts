@@ -1,4 +1,5 @@
 import { apiGetListAll, apiPatch, apiPost } from "./apiClient";
+import { fetchWarehouseStockBySku } from "./warehouseService";
 
 type CsvRow = Record<string, string>;
 
@@ -315,10 +316,12 @@ export async function fetchProductListingMeta() {
   return map;
 }
 
-export async function fetchInventoryListingBySku(): Promise<InventorySkuListing[]> {
-  const [products, inventoryRows] = await Promise.all([
+// Shared builder so listing and warehouseMap come from a single set of fetches.
+async function _fetchListingData() {
+  const [products, inventoryRows, warehouseMap] = await Promise.all([
     apiGetListAll<ProductListingRow>(ENTITY_PRODUCT),
     apiGetListAll<InventoryStockRow>(ENTITY_INVENTORY_STOCKS),
+    fetchWarehouseStockBySku(),
   ]);
 
   const productBySkuKey = new Map<string, ProductListingRow>();
@@ -353,7 +356,6 @@ export async function fetchInventoryListingBySku(): Promise<InventorySkuListing[
     }
 
     const agg = bySku.get(skuKey)!;
-    agg.inHand += toNum(row.in_hand);
     agg.backorder += toNum(row.backorder);
     agg.incoming += toNum(row.incoming);
     agg.totalStock += toNum(row.total_stock);
@@ -361,7 +363,45 @@ export async function fetchInventoryListingBySku(): Promise<InventorySkuListing[
     agg.stockLast6m += toNum(row.stock_last_6m);
   });
 
-  return Array.from(bySku.values()).sort((a, b) => a.skuId.localeCompare(b.skuId));
+  // Ensure SKUs that exist in Product/Warehouse appear even when inventory rows are sparse.
+  productBySkuKey.forEach((product, skuKey) => {
+    if (bySku.has(skuKey)) return;
+
+    bySku.set(skuKey, {
+      skuId: (product.sku_id || "").trim(),
+      modelName: product.sku_model_name || "",
+      categoryLabel: CATEGORY_ID_TO_LABEL[product.category ?? 0] || "Uncategorized",
+      supplierId: product?.supplier_id != null ? String(product.supplier_id) : "",
+      inHand: 0,
+      backorder: 0,
+      incoming: 0,
+      totalStock: 0,
+      stockLast3m: 0,
+      stockLast6m: 0,
+    });
+  });
+
+  bySku.forEach((agg, skuKey) => {
+    const warehouses = warehouseMap.get(skuKey) || [];
+    if (!warehouses.length) return;
+
+    const inHandFromWarehouse = warehouses.reduce((sum, wh) => sum + toNum(wh.quantity), 0);
+    agg.inHand = inHandFromWarehouse;
+    agg.totalStock = inHandFromWarehouse + agg.incoming;
+  });
+
+  const listing = Array.from(bySku.values()).sort((a, b) => a.skuId.localeCompare(b.skuId));
+  return { listing, warehouseMap };
+}
+
+/** Returns listing + warehouse map together so the caller avoids a second warehouse fetch. */
+export async function fetchInventoryListingAndWarehouseMap() {
+  return _fetchListingData();
+}
+
+export async function fetchInventoryListingBySku(): Promise<InventorySkuListing[]> {
+  const { listing } = await _fetchListingData();
+  return listing;
 }
 
 function toNum(v: unknown) {

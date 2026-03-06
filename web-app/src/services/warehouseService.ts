@@ -10,6 +10,12 @@ type WarehouseRow = {
   unit_qty?: number | null;
 };
 
+export type WarehouseStockDetail = {
+  warehouseCode: string;
+  warehouseName: string;
+  quantity: number;
+};
+
 type ProductRow = {
   sku_id: string;
 };
@@ -181,4 +187,122 @@ export async function uploadWarehouseCsv(file: File) {
     updated,
     errors,
   };
+}
+
+function normalizeSkuKey(v: string) {
+  return (v || "").trim().toUpperCase();
+}
+
+export async function fetchWarehouseStockBySku(): Promise<Map<string, WarehouseStockDetail[]>> {
+  const [rows, products] = await Promise.all([
+    apiGetListAll<WarehouseRow>(ENTITY_WAREHOUSE),
+    apiGetListAll<ProductRow>(ENTITY_PRODUCT),
+  ]);
+
+  // Build master warehouse list from DB so each SKU can show a full warehouse-style listing.
+  const warehouseMaster = new Map<string, WarehouseStockDetail>();
+  rows.forEach((row) => {
+    const warehouseCode = (row.warehouse_code || "").trim();
+    const warehouseName = (row.warehouse_name || "").trim();
+    const bucketKey = key(warehouseCode || warehouseName || "UNKNOWN");
+
+    if (!warehouseMaster.has(bucketKey)) {
+      warehouseMaster.set(bucketKey, {
+        warehouseCode: warehouseCode || "-",
+        warehouseName: warehouseName || "Unknown",
+        quantity: 0,
+      });
+      return;
+    }
+
+    // Keep better labels if a later row has missing code/name filled in.
+    const master = warehouseMaster.get(bucketKey)!;
+    if (master.warehouseCode === "-" && warehouseCode) master.warehouseCode = warehouseCode;
+    if (master.warehouseName === "Unknown" && warehouseName) master.warehouseName = warehouseName;
+  });
+
+  const grouped = new Map<string, Map<string, WarehouseStockDetail>>();
+
+  rows.forEach((row) => {
+    const rawSku = (row.sku_id || "").trim();
+    if (!rawSku) return;
+
+    const skuKey = normalizeSkuKey(rawSku);
+    const warehouseCode = (row.warehouse_code || "").trim();
+    const warehouseName = (row.warehouse_name || "").trim();
+    const quantity = Number(row.unit_qty) || 0;
+
+    if (!grouped.has(skuKey)) {
+      grouped.set(skuKey, new Map<string, WarehouseStockDetail>());
+    }
+
+    const perSku = grouped.get(skuKey)!;
+    const bucketKey = key(warehouseCode || warehouseName || "UNKNOWN");
+
+    if (!perSku.has(bucketKey)) {
+      perSku.set(bucketKey, {
+        warehouseCode: warehouseCode || "-",
+        warehouseName: warehouseName || "Unknown",
+        quantity: 0,
+      });
+    }
+
+    const detail = perSku.get(bucketKey)!;
+    detail.quantity += quantity;
+  });
+
+  // Ensure all product SKUs are present, even when warehouse rows are missing.
+  products.forEach((p) => {
+    const skuKey = normalizeSkuKey(p.sku_id || "");
+    if (!skuKey) return;
+    if (!grouped.has(skuKey)) grouped.set(skuKey, new Map<string, WarehouseStockDetail>());
+  });
+
+  const result = new Map<string, WarehouseStockDetail[]>();
+  const sortedWarehouseTemplate = Array.from(warehouseMaster.values()).sort((a, b) =>
+    `${a.warehouseCode} ${a.warehouseName}`.localeCompare(
+      `${b.warehouseCode} ${b.warehouseName}`
+    )
+  );
+
+  grouped.forEach((value, skuKey) => {
+    const completeByWarehouse = new Map<string, WarehouseStockDetail>();
+
+    // Start with all known warehouses as 0 qty.
+    sortedWarehouseTemplate.forEach((warehouse) => {
+      const bucketKey = key(warehouse.warehouseCode || warehouse.warehouseName || "UNKNOWN");
+      completeByWarehouse.set(bucketKey, {
+        warehouseCode: warehouse.warehouseCode,
+        warehouseName: warehouse.warehouseName,
+        quantity: 0,
+      });
+    });
+
+    // Overlay the actual qty for this SKU.
+    value.forEach((warehouse, bucketKey) => {
+      const existing = completeByWarehouse.get(bucketKey);
+      if (existing) {
+        existing.quantity = warehouse.quantity;
+        if (existing.warehouseCode === "-" && warehouse.warehouseCode) {
+          existing.warehouseCode = warehouse.warehouseCode;
+        }
+        if (existing.warehouseName === "Unknown" && warehouse.warehouseName) {
+          existing.warehouseName = warehouse.warehouseName;
+        }
+      } else {
+        completeByWarehouse.set(bucketKey, warehouse);
+      }
+    });
+
+    result.set(
+      skuKey,
+      Array.from(completeByWarehouse.values()).sort((a, b) =>
+        `${a.warehouseCode} ${a.warehouseName}`.localeCompare(
+          `${b.warehouseCode} ${b.warehouseName}`
+        )
+      )
+    );
+  });
+
+  return result;
 }

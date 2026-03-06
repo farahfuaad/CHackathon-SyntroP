@@ -254,10 +254,67 @@ async function postSalesChunkWithRetry(
   throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} failed: ${lastError}`);
 }
 
-import { apiPostBatched } from "./apiClient";
+import { apiGetListAll, apiPostBatched } from "./apiClient";
 
 type BulkChunkResult = { inserted?: number; updated?: number; failed?: number; errors?: string[] };
 const SALES_BULK_ENTITY = import.meta.env.VITE_SALES_BULK_ENTITY || "sales_bulk_upsert";
+
+function normalizeSkuKey(v: string) {
+  return (v || "").trim().toUpperCase();
+}
+
+function monthToTime(v: string): number {
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+// Module-level promise cache — shared across concurrent calls, 5-minute TTL.
+let _amsPromise: Promise<Map<string, number>> | null = null;
+let _amsPromiseTs = 0;
+const AMS_TTL_MS = 5 * 60 * 1000;
+
+/** Invalidate after a successful sales CSV upload so users see fresh AMS. */
+export function invalidateAmsCache(): void {
+  _amsPromise = null;
+}
+
+export function fetchAms3mBySku(): Promise<Map<string, number>> {
+  if (_amsPromise && Date.now() - _amsPromiseTs < AMS_TTL_MS) {
+    return _amsPromise;
+  }
+
+  _amsPromiseTs = Date.now();
+  _amsPromise = (async (): Promise<Map<string, number>> => {
+    const rows = await apiGetListAll<SalesRow>("Sales");
+
+    const bySku = new Map<string, SalesRow[]>();
+    rows.forEach((row) => {
+      const skuKey = normalizeSkuKey(row.sku_id || "");
+      if (!skuKey) return;
+      if (!bySku.has(skuKey)) bySku.set(skuKey, []);
+      bySku.get(skuKey)!.push(row);
+    });
+
+    const amsBySku = new Map<string, number>();
+    bySku.forEach((salesRows, skuKey) => {
+      const latestThree = salesRows
+        .slice()
+        .sort((a, b) => monthToTime(b.month) - monthToTime(a.month))
+        .slice(0, 3);
+
+      if (!latestThree.length) {
+        amsBySku.set(skuKey, 0);
+        return;
+      }
+      const totalUnits = latestThree.reduce((sum, r) => sum + (Number(r.units_sold) || 0), 0);
+      amsBySku.set(skuKey, totalUnits / latestThree.length);
+    });
+
+    return amsBySku;
+  })();
+
+  return _amsPromise;
+}
 
 export async function uploadSalesRowsFast(
   rows: SalesRow[],

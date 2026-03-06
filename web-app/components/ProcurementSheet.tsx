@@ -1,17 +1,27 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { SKU, Supplier } from '../types';
-import { Info, ShoppingCart } from 'lucide-react';
-import { fetchInventoryListingBySku, InventorySkuListing } from '../src/services/productDetailService';
+import { Info, ShoppingCart, X } from 'lucide-react';
+import { fetchInventoryListingAndWarehouseMap, InventorySkuListing } from '../src/services/productDetailService';
+import { fetchAms3mBySku } from '../src/services/salesService';
+import { fetchSupplierListing, SupplierListing } from '../src/services/supplierService';
+import { WarehouseStockDetail } from '../src/services/warehouseService';
 
 interface Props {
-  skus: SKU[];
-  suppliers: Supplier[];
   onAddToPlanning: (skuId: string) => void;
 }
 
-const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlanning }) => {
+function normalizeSkuKey(v: string) {
+  return (v || '').trim().toUpperCase();
+}
+
+const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const [rows, setRows] = useState<InventorySkuListing[]>([]);
+  const [ams3mBySku, setAms3mBySku] = useState<Map<string, number>>(new Map());
+  const [supplierOptions, setSupplierOptions] = useState<SupplierListing[]>([]);
+  const [warehouseBySku, setWarehouseBySku] = useState<Map<string, WarehouseStockDetail[]>>(new Map());
+  const [selectedSkuForModal, setSelectedSkuForModal] = useState<InventorySkuListing | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [page, setPage] = useState<number>(1);
 
   const PAGE_SIZE = 20;
@@ -21,10 +31,26 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
 
     (async () => {
       try {
-        const data = await fetchInventoryListingBySku();
-        if (mounted) setRows(data);
+        setIsLoading(true);
+
+        // All three fetches run in parallel. fetchAms3mBySku is cached after first
+        // call so every subsequent render (navigation back, etc.) is instant.
+        const [{ listing, warehouseMap }, suppliers, salesAmsMap] = await Promise.all([
+          fetchInventoryListingAndWarehouseMap(),
+          fetchSupplierListing(),
+          fetchAms3mBySku(),
+        ]);
+
+        if (!mounted) return;
+
+        setRows(listing);
+        setSupplierOptions(suppliers);
+        setWarehouseBySku(warehouseMap);
+        setAms3mBySku(salesAmsMap);
       } catch (err) {
-        console.error('Failed to fetch inventory listing by sku:', err);
+        console.error('Failed to fetch procurement sheet data:', err);
+      } finally {
+        if (mounted) setIsLoading(false);
       }
     })();
 
@@ -34,15 +60,24 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
   }, []);
 
   const filteredRows = useMemo(() => {
-    if (selectedSupplierId === 'all') return rows;
-    return rows.filter((r) => r.supplierId === selectedSupplierId);
-  }, [selectedSupplierId, rows]);
+    const q = searchTerm.trim().toLowerCase();
+
+    return rows.filter((r) => {
+      const passSupplier = selectedSupplierId === 'all' || r.supplierId === selectedSupplierId;
+      if (!passSupplier) return false;
+      if (!q) return true;
+
+      const sku = (r.skuId || '').toLowerCase();
+      const model = (r.modelName || '').toLowerCase();
+      return sku.includes(q) || model.includes(q);
+    });
+  }, [selectedSupplierId, rows, searchTerm]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
   useEffect(() => {
     setPage(1);
-  }, [selectedSupplierId, rows]);
+  }, [selectedSupplierId, searchTerm, rows]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -52,6 +87,14 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
     const start = (page - 1) * PAGE_SIZE;
     return filteredRows.slice(start, start + PAGE_SIZE);
   }, [filteredRows, page]);
+
+  const selectedWarehouseDetails = selectedSkuForModal
+    ? warehouseBySku.get(normalizeSkuKey(selectedSkuForModal.skuId)) || []
+    : [];
+
+  const selectedWarehouseDetailsForDisplay = selectedWarehouseDetails.filter((item) => item.quantity > 0);
+
+  const selectedWarehouseTotal = selectedWarehouseDetailsForDisplay.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
@@ -63,6 +106,8 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
           <input
             type="text"
             placeholder="Search by Model or SKU..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-10 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
         </div>
@@ -76,20 +121,13 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
               className="bg-transparent outline-none"
             >
               <option value="all">All Suppliers</option>
-              {suppliers.map((supplier) => (
+              {supplierOptions.map((supplier) => (
                 <option key={supplier.id} value={supplier.id}>
                   {supplier.name}
                 </option>
               ))}
             </select>
           </div>
-          <button 
-            onClick={() => {/* Trigger your Add Logic */}} 
-            className="px-4 py-2 text-sm font-bold text-white rounded-xl shadow-md hover:opacity-90 active:scale-95 transition-all flex items-center" 
-            style={{ backgroundColor: '#E31E24' }}
-          >
-            <i className="fa-solid fa-plus mr-2"></i> Add SKU
-          </button>
         </div>
       </div>
 
@@ -110,13 +148,35 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {visibleRows.map((row) => {
-                const ams3m = row.stockLast3m > 0 ? row.stockLast3m / 3 : 0;
+              {isLoading ? (
+                Array.from({ length: 10 }).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    <td className="px-4 py-4">
+                      <div className="flex flex-col gap-2">
+                        <div className="h-3.5 bg-slate-200 rounded w-36" />
+                        <div className="h-2.5 bg-slate-100 rounded w-24" />
+                        <div className="h-2.5 bg-slate-100 rounded w-16" />
+                      </div>
+                    </td>
+                    {Array.from({ length: 7 }).map((_, j) => (
+                      <td key={j} className="px-4 py-4 text-center">
+                        <div className="h-3.5 bg-slate-200 rounded mx-auto w-10" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : visibleRows.map((row) => {
+                const skuKey = normalizeSkuKey(row.skuId);
+                const ams3m = ams3mBySku.get(skuKey) ?? 0;
                 const stockLast = ams3m > 0 ? (row.totalStock / ams3m).toFixed(1) : '0.0';
                 const isLow = Number(stockLast) < 1.5;
 
                 return (
-                  <tr key={row.skuId} className="hover:bg-slate-50/50 transition-colors">
+                  <tr
+                    key={row.skuId}
+                    className="hover:bg-slate-50/50 transition-colors cursor-pointer"
+                    onClick={() => setSelectedSkuForModal(row)}
+                  >
                     <td className="px-4 py-4">
                       <div className="flex flex-col gap-1">
                         <span className="font-bold text-slate-900">{row.modelName || '-'}</span>
@@ -140,7 +200,10 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
                     </td>
                     <td className="px-4 py-4 text-center">
                       <button
-                        onClick={() => onAddToPlanning(row.skuId)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddToPlanning(row.skuId);
+                        }}
                         className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
                       >
                         <ShoppingCart size={18} />
@@ -182,6 +245,71 @@ const ProcurementSheet: React.FC<Props> = ({ skus: _skus, suppliers, onAddToPlan
           </button>
         </div>
       </div>
+
+      {selectedSkuForModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/45 p-4 flex items-center justify-center"
+          onClick={() => setSelectedSkuForModal(null)}
+        >
+          <div
+            className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Warehouse Breakdown</h3>
+                <p className="text-sm text-slate-500">
+                  {selectedSkuForModal.modelName || '-'} ({selectedSkuForModal.skuId})
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedSkuForModal(null)}
+                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close warehouse details"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 text-sm text-slate-600 flex flex-wrap gap-4">
+              <span>
+                In Hand (listing): <strong className="text-slate-900">{selectedSkuForModal.inHand}</strong>
+              </span>
+              <span>
+                Warehouse total: <strong className="text-slate-900">{selectedWarehouseTotal}</strong>
+              </span>
+            </div>
+
+            {selectedWarehouseDetailsForDisplay.length === 0 ? (
+              <p className="px-5 py-6 text-sm text-slate-500">No non-zero warehouse quantities found for this SKU.</p>
+            ) : (
+              <div className="max-h-[420px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-white border-b border-slate-100">
+                    <tr className="text-left text-slate-500">
+                      <th className="px-5 py-2.5 font-semibold">Warehouse</th>
+                      <th className="px-5 py-2.5 font-semibold">Name</th>
+                      <th className="px-5 py-2.5 font-semibold text-right">Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedWarehouseDetailsForDisplay.map((warehouse) => (
+                      <tr
+                        key={`${selectedSkuForModal.skuId}-${warehouse.warehouseCode}-${warehouse.warehouseName}`}
+                        className="border-b border-slate-50 last:border-b-0"
+                      >
+                        <td className="px-5 py-2.5 font-mono text-xs text-slate-700">{warehouse.warehouseCode}</td>
+                        <td className="px-5 py-2.5 text-slate-700">{warehouse.warehouseName}</td>
+                        <td className="px-5 py-2.5 text-right font-semibold text-slate-900">{warehouse.quantity}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

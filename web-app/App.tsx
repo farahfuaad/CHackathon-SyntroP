@@ -168,8 +168,6 @@ const App: React.FC = () => {
 
           {activeTab === 'planning' && (
             <ProcurementSheet
-              skus={skus}
-              suppliers={suppliers}
               onAddToPlanning={handleAddToPlanning}
             />
           )}
