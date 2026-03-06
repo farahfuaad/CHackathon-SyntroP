@@ -18,32 +18,13 @@ type UploadResult = {
 type ComplaintRow = {
   sku_id: string;
   complaint_date: string; // YYYY-MM-DD
-  issues: number;
-  cause: number;
+  issues: string;
+  cause: string;
   failure_count: number;
 };
 
 const CHUNK_SIZE = Math.max(1, Number(import.meta.env.VITE_COMPLAINT_UPLOAD_CHUNK_SIZE ?? 1000));
 const ROW_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_COMPLAINT_DAB_CONCURRENCY ?? 8));
-
-const ISSUE_MAP: Record<string, number> = {
-  'door not closing': 1,
-  'power failure': 2,
-  'sensor faulty': 3,
-  'panel cracked': 4,
-  'overheating': 5,
-  'not cooling': 6,
-  'noise issue': 7,
-  'water leakage': 8,
-};
-
-const CAUSE_MAP: Record<string, number> = {
-  'electrical fault': 1,
-  'user mishandling': 2,
-  'manufacturing defect': 3,
-  'wear and tear': 4,
-  'component failure': 5,
-};
 
 const COMPLAINT_ENTITY =
   import.meta.env.VITE_COMPLAINT_ENTITY || 'ComplaintIssue';
@@ -77,28 +58,14 @@ function toInt(raw: unknown): number | null {
   return Number.isInteger(n) ? n : null;
 }
 
-function mapIssue(raw: unknown): number | null {
-  const numeric = toInt(raw);
-  if (numeric !== null) return numeric;
-  const key = normalizeText(raw);
-  return ISSUE_MAP[key] ?? null;
-}
-
-function mapCause(raw: unknown): number | null {
-  const numeric = toInt(raw);
-  if (numeric !== null) return numeric;
-  const key = normalizeText(raw);
-  return CAUSE_MAP[key] ?? null;
-}
-
 function mapRecordToComplaintRow(record: Record<string, unknown>): { row: ComplaintRow | null; error?: string } {
   const normalized: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(record)) normalized[normalizeHeader(k)] = v;
 
   const sku = String(normalized['sku_id'] ?? normalized['sku'] ?? '').trim();
   const complaintDate = toDateString(normalized['complaint_date'] ?? normalized['date']);
-  const issueCode = mapIssue(normalized['issues'] ?? normalized['issue']);
-  const causeCode = mapCause(normalized['cause']);
+  const issueCode = String(normalized['issues'] ?? normalized['issue']);
+  const causeCode = String(normalized['cause']);
   const failureCount = toInt(normalized['failure_count'] ?? normalized['failure'] ?? normalized['failures']);
 
   if (!sku) return { row: null, error: 'Missing sku_id' };
