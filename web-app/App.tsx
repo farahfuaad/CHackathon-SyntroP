@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -6,14 +6,20 @@ import {
   AlertTriangle,
   Settings,
   ChevronRight,
-  TrendingUp,
   ClipboardClock,
   PencilRuler,
   ListStart,
   Upload,
   LogOut
 } from 'lucide-react';
-import { SKU, WarehouseCategory, PurchaseRequisition, Supplier, ContainerType } from './types';
+import {
+  SKU,
+  WarehouseCategory,
+  PurchaseRequisition,
+  Supplier,
+  ContainerType,
+  PlanningDraft
+} from './types';
 import { MOCK_SKUS, MOCK_SUPPLIERS, CONTAINER_TYPES } from './constants';
 import ProcurementSheet from './components/ProcurementSheet';
 import RiskDashboard from './components/RiskDashboard';
@@ -32,13 +38,20 @@ type BUParameters = {
   promotionalActivity: string;
 };
 
-const App: React.FC = () => {
+const AUTH_KEY = 'syntrop_auth'; // or store token under a different key
+const AUTH_USER_KEY = 'syntrop_auth_user';
+
+function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'container' | 'approvals' | 'spec' | 'data'>('dashboard');
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [skus, setSkus] = useState<SKU[]>(MOCK_SKUS);
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
   const [containers, setContainers] = useState<ContainerType[]>(CONTAINER_TYPES);
   const [plannedSkus, setPlannedSkus] = useState<{ skuId: string, qty: number }[]>([]);
+  const [planningTitle, setPlanningTitle] = useState('New Shipment Planning');
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [selectedContainerName, setSelectedContainerName] = useState(CONTAINER_TYPES[0]?.name ?? '');
+  const [drafts, setDrafts] = useState<PlanningDraft[]>([]);
   const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
   const [uploadedData, setUploadedData] = useState<any>(null);
 
@@ -67,8 +80,30 @@ const App: React.FC = () => {
 
   const handleGeneratePr = (newPr: PurchaseRequisition) => {
     setPrs([newPr, ...prs]);
-    setPlannedSkus([]); 
-    setActiveTab('approvals'); 
+    setPlannedSkus([]);
+    setPlanningTitle('New Shipment Planning');
+    setCurrentDraftId(null);
+    setSelectedContainerName(CONTAINER_TYPES[0]?.name ?? '');
+    setActiveTab('approvals');
+  };
+
+  const handleSaveDraft = (draft: PlanningDraft) => {
+    const idx = drafts.findIndex(d => d.id === draft.id);
+    if (idx >= 0) {
+      const next = [...drafts];
+      next[idx] = draft;
+      setDrafts(next);
+    } else {
+      setDrafts([draft, ...drafts]);
+    }
+    setCurrentDraftId(draft.id);
+  };
+
+  const handleLoadDraft = (draft: PlanningDraft) => {
+    setPlannedSkus(draft.items);
+    setPlanningTitle(draft.title);
+    setSelectedContainerName(draft.containerType);
+    setCurrentDraftId(draft.id);
   };
 
   const handleSignIn = async (email: string, password: string) => {
@@ -76,13 +111,33 @@ const App: React.FC = () => {
     if (!user) {
       throw new Error('Invalid email or password.');
     }
+
     setCurrentUser(user);
+    localStorage.setItem(AUTH_KEY, '1');
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
   };
 
   const handleSignOut = () => {
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
     setCurrentUser(null);
     setActiveTab('dashboard');
   };
+
+  useEffect(() => {
+    const savedAuth = localStorage.getItem(AUTH_KEY);
+    const savedUser = localStorage.getItem(AUTH_USER_KEY);
+
+    if (savedAuth === '1' && savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser) as AuthenticatedUser;
+        setCurrentUser(parsedUser);
+      } catch {
+        localStorage.removeItem(AUTH_KEY);
+        localStorage.removeItem(AUTH_USER_KEY);
+      }
+    }
+  }, []);
 
   if (!currentUser) {
     return <SignIn onSignIn={handleSignIn} />;
@@ -173,11 +228,19 @@ const App: React.FC = () => {
           )}
           {activeTab === 'container' && (
             <ContainerPlanner 
-              skus={skus} 
-              suppliers={suppliers}
+              skus={skus}
               containerTypes={containers}
-              selectedSkus={plannedSkus} 
+              selectedSkus={plannedSkus}
               setSelectedSkus={setPlannedSkus}
+              planningTitle={planningTitle}
+              setPlanningTitle={setPlanningTitle}
+              currentDraftId={currentDraftId}
+              setCurrentDraftId={setCurrentDraftId}
+              selectedContainerName={selectedContainerName}
+              setSelectedContainerName={setSelectedContainerName}
+              drafts={drafts}
+              onSaveDraft={handleSaveDraft}
+              onLoadDraft={handleLoadDraft}
               onGeneratePr={handleGeneratePr}
             />
           )}
@@ -206,7 +269,7 @@ const App: React.FC = () => {
       </main>
     </div>
   );
-};
+}
 
 const StatCard = ({ title, value, icon: Icon, trend, color }: any) => {
   const colorMap: any = {

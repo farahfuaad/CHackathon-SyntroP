@@ -34,6 +34,13 @@ export interface SKU {
   supplierId: string; // Linked to MOCK_SUPPLIERS
 }
 
+export interface BUParameters {
+  leadGrowthTarget: number; // Percentage growth expected in leads
+  seasonalMultiplier: number; // Factor for upcoming seasonal events
+  safetyStockBufferWeeks: number; // Extra weeks of inventory to hold
+  promotionalActivity: string; // Description of upcoming marketing campaigns
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -65,4 +72,12 @@ export interface PurchaseRequisition {
   status: 'DRAFT' | 'APPROVED' | 'REJECTED';
   createdAt: string;
   emailSentAt?: string;
+}
+
+export interface PlanningDraft {
+  id: string;
+  title: string;
+  items: { skuId: string, qty: number }[];
+  containerType: string;
+  updatedAt: string;
 }
