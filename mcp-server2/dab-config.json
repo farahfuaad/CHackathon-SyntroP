@@ -18,15 +18,19 @@
       "path": "/graphql",
       "allow-introspection": true
     },
+    "mcp": {
+      "enabled": true,
+      "path": "/mcp"
+    },
     "host": {
       "cors": {
-        "origins": [],
+        "origins": ["*"],
         "allow-credentials": false
       },
       "authentication": {
-        "provider": "StaticWebApps"
+        "provider": "Simulator"
       },
-      "mode": "production"
+      "mode": "development"
     }
   },
   "entities": {
