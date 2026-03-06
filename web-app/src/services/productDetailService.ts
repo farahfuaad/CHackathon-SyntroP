@@ -435,3 +435,21 @@ export async function fetchProductSpecListing(): Promise<ProductSpecListing[]> {
     .filter((r) => !!r.skuId)
     .sort((a, b) => a.skuId.localeCompare(b.skuId));
 }
+
+export async function updateProductSpecDimensions(
+  skuId: string,
+  patch: Partial<Pick<ProductSpecListing, "lengthCm" | "widthCm" | "heightCm" | "weightKg">>
+): Promise<void> {
+  const cleanSku = (skuId || "").trim();
+  if (!cleanSku) {
+    throw new Error("skuId is required");
+  }
+
+  const payload: Record<string, unknown> = {};
+  if (patch.lengthCm != null) payload.box_length_cm = Number(patch.lengthCm) || 0;
+  if (patch.widthCm != null) payload.box_width_cm = Number(patch.widthCm) || 0;
+  if (patch.heightCm != null) payload.box_height_cm = Number(patch.heightCm) || 0;
+  if (patch.weightKg != null) payload.box_weight_kg = Number(patch.weightKg) || 0;
+
+  await apiPatch(ENTITY_PRODUCT, "sku_id", cleanSku, payload);
+}
