@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -32,7 +32,10 @@ type BUParameters = {
   promotionalActivity: string;
 };
 
-const App: React.FC = () => {
+const AUTH_KEY = 'syntrop_auth'; // or store token under a different key
+const AUTH_USER_KEY = 'syntrop_auth_user';
+
+function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'container' | 'approvals' | 'spec' | 'data'>('dashboard');
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [skus, setSkus] = useState<SKU[]>(MOCK_SKUS);
@@ -76,13 +79,33 @@ const App: React.FC = () => {
     if (!user) {
       throw new Error('Invalid email or password.');
     }
+
     setCurrentUser(user);
+    localStorage.setItem(AUTH_KEY, '1');
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
   };
 
   const handleSignOut = () => {
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
     setCurrentUser(null);
     setActiveTab('dashboard');
   };
+
+  useEffect(() => {
+    const savedAuth = localStorage.getItem(AUTH_KEY);
+    const savedUser = localStorage.getItem(AUTH_USER_KEY);
+
+    if (savedAuth === '1' && savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser) as AuthenticatedUser;
+        setCurrentUser(parsedUser);
+      } catch {
+        localStorage.removeItem(AUTH_KEY);
+        localStorage.removeItem(AUTH_USER_KEY);
+      }
+    }
+  }, []);
 
   if (!currentUser) {
     return <SignIn onSignIn={handleSignIn} />;
@@ -206,7 +229,7 @@ const App: React.FC = () => {
       </main>
     </div>
   );
-};
+}
 
 const StatCard = ({ title, value, icon: Icon, trend, color }: any) => {
   const colorMap: any = {
