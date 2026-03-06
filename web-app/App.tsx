@@ -6,14 +6,20 @@ import {
   AlertTriangle,
   Settings,
   ChevronRight,
-  TrendingUp,
   ClipboardClock,
   PencilRuler,
   ListStart,
   Upload,
   LogOut
 } from 'lucide-react';
-import { SKU, WarehouseCategory, PurchaseRequisition, Supplier, ContainerType } from './types';
+import {
+  SKU,
+  WarehouseCategory,
+  PurchaseRequisition,
+  Supplier,
+  ContainerType,
+  PlanningDraft
+} from './types';
 import { MOCK_SKUS, MOCK_SUPPLIERS, CONTAINER_TYPES } from './constants';
 import ProcurementSheet from './components/ProcurementSheet';
 import RiskDashboard from './components/RiskDashboard';
@@ -42,6 +48,10 @@ function App() {
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
   const [containers, setContainers] = useState<ContainerType[]>(CONTAINER_TYPES);
   const [plannedSkus, setPlannedSkus] = useState<{ skuId: string, qty: number }[]>([]);
+  const [planningTitle, setPlanningTitle] = useState('New Shipment Planning');
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  const [selectedContainerName, setSelectedContainerName] = useState(CONTAINER_TYPES[0]?.name ?? '');
+  const [drafts, setDrafts] = useState<PlanningDraft[]>([]);
   const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
   const [uploadedData, setUploadedData] = useState<any>(null);
 
@@ -70,8 +80,30 @@ function App() {
 
   const handleGeneratePr = (newPr: PurchaseRequisition) => {
     setPrs([newPr, ...prs]);
-    setPlannedSkus([]); 
-    setActiveTab('approvals'); 
+    setPlannedSkus([]);
+    setPlanningTitle('New Shipment Planning');
+    setCurrentDraftId(null);
+    setSelectedContainerName(CONTAINER_TYPES[0]?.name ?? '');
+    setActiveTab('approvals');
+  };
+
+  const handleSaveDraft = (draft: PlanningDraft) => {
+    const idx = drafts.findIndex(d => d.id === draft.id);
+    if (idx >= 0) {
+      const next = [...drafts];
+      next[idx] = draft;
+      setDrafts(next);
+    } else {
+      setDrafts([draft, ...drafts]);
+    }
+    setCurrentDraftId(draft.id);
+  };
+
+  const handleLoadDraft = (draft: PlanningDraft) => {
+    setPlannedSkus(draft.items);
+    setPlanningTitle(draft.title);
+    setSelectedContainerName(draft.containerType);
+    setCurrentDraftId(draft.id);
   };
 
   const handleSignIn = async (email: string, password: string) => {
@@ -196,11 +228,19 @@ function App() {
           )}
           {activeTab === 'container' && (
             <ContainerPlanner 
-              skus={skus} 
-              suppliers={suppliers}
+              skus={skus}
               containerTypes={containers}
-              selectedSkus={plannedSkus} 
+              selectedSkus={plannedSkus}
               setSelectedSkus={setPlannedSkus}
+              planningTitle={planningTitle}
+              setPlanningTitle={setPlanningTitle}
+              currentDraftId={currentDraftId}
+              setCurrentDraftId={setCurrentDraftId}
+              selectedContainerName={selectedContainerName}
+              setSelectedContainerName={setSelectedContainerName}
+              drafts={drafts}
+              onSaveDraft={handleSaveDraft}
+              onLoadDraft={handleLoadDraft}
               onGeneratePr={handleGeneratePr}
             />
           )}
