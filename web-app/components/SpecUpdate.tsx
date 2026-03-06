@@ -2,8 +2,21 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { SKU, Supplier, ContainerType } from '../types';
 import {
   fetchProductSpecListing,
-  ProductSpecListing
+  ProductSpecListing,
+  updateProductSpecDimensions,
 } from '../src/services/productDetailService';
+import {
+  createContainerReference,
+  deleteContainerReference,
+  fetchContainerReference,
+  updateContainerReference,
+} from '../src/services/containerService';
+import {
+  createSupplierReference,
+  deleteSupplierReference,
+  fetchSupplierReference,
+  updateSupplierReference,
+} from '../src/services/supplierService';
 import { 
   Users, 
   Container, 
@@ -24,12 +37,24 @@ interface Props {
   setContainers: React.Dispatch<React.SetStateAction<ContainerType[]>>;
 }
 
+type EditableContainer = ContainerType & {
+  _key: string;
+  _dbId?: number;
+  _isNew?: boolean;
+  _isDeleted?: boolean;
+  _dirty?: boolean;
+};
+
 const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, containers, setContainers }) => {
   const [activeSubTab, setActiveSubTab] = useState<'suppliers' | 'containers' | 'sku-specs'>('suppliers');
   const [saveStatus, setSaveStatus] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isContainerModalOpen, setIsContainerModalOpen] = useState(false);
   const [skuSpecRows, setSkuSpecRows] = useState<ProductSpecListing[]>([]);
+  const [containerRows, setContainerRows] = useState<EditableContainer[]>([]);
+  const [pendingDeletedSupplierIds, setPendingDeletedSupplierIds] = useState<Set<string>>(new Set());
+  const [pendingSkuSpecIds, setPendingSkuSpecIds] = useState<Set<string>>(new Set());
   const [skuSpecPage, setSkuSpecPage] = useState<number>(1);
   const SKU_PAGE_SIZE = 20;
 
@@ -45,6 +70,53 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
     })();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const dbSuppliers = await fetchSupplierReference();
+        if (!mounted) return;
+        setSuppliers(dbSuppliers);
+      } catch (err) {
+        console.error('Failed to fetch supplier reference:', err);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [setSuppliers]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const dbContainers = await fetchContainerReference();
+        if (!mounted) return;
+
+        const rows = dbContainers.map((c) => ({
+          _key: `db-${c.id}`,
+          _dbId: c.id,
+          _dirty: false,
+          _isDeleted: false,
+          _isNew: false,
+          name: c.name,
+          capacityCbm: c.capacityCbm,
+          maxWeightKg: c.maxWeightKg,
+        }));
+
+        setContainerRows(rows);
+        setContainers(rows.map(({ name, capacityCbm, maxWeightKg }) => ({ name, capacityCbm, maxWeightKg })));
+      } catch (err) {
+        console.error('Failed to fetch container reference:', err);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [setContainers]);
 
   const skuSpecTotalPages = Math.max(1, Math.ceil(skuSpecRows.length / SKU_PAGE_SIZE));
 
@@ -64,6 +136,11 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
   ) => {
     const safe = Number.isFinite(value) ? value : 0;
     setSkuSpecRows((prev) => prev.map((r) => (r.skuId === skuId ? { ...r, [field]: safe } : r)));
+    setPendingSkuSpecIds((prev) => {
+      const next = new Set(prev);
+      next.add(skuId);
+      return next;
+    });
   };
 
   const handleSaveNotification = () => {
@@ -75,8 +152,132 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
     setSuppliers(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
   };
 
-  const updateContainer = (index: number, field: keyof ContainerType, value: any) => {
-    setContainers(prev => prev.map((c, i) => i === index ? { ...c, [field]: value } : c));
+  const persistSupplier = async (id: string, field: keyof Supplier, value: any) => {
+    try {
+      if (field === 'name') {
+        await updateSupplierReference(id, { name: String(value || '') });
+      } else if (field === 'email') {
+        await updateSupplierReference(id, { email: String(value || '') });
+      } else if (field === 'standardLeadTime') {
+        await updateSupplierReference(id, { standardLeadTime: Number(value) || 0 });
+      } else {
+        return;
+      }
+
+      handleSaveNotification();
+    } catch (err) {
+      console.error('Failed to update supplier in DB:', err);
+    }
+  };
+
+  const updateContainer = (key: string, field: keyof ContainerType, value: any) => {
+    setContainerRows((prev) =>
+      prev.map((c) => (c._key === key ? { ...c, [field]: value, _dirty: true } : c))
+    );
+  };
+
+  const handleDeleteContainer = (key: string) => {
+    setContainerRows((prev) =>
+      prev
+        .map((c) => {
+          if (c._key !== key) return c;
+          if (c._isNew) return { ...c, _isDeleted: true };
+          return { ...c, _isDeleted: true, _dirty: true };
+        })
+        .filter((c) => !(c._isNew && c._isDeleted))
+    );
+  };
+
+  const handleDeleteSupplier = (supplierId: string) => {
+    // UI-only delete; persisted only when Save Changes is clicked.
+    setSuppliers((prev) => prev.filter((s) => s.id !== supplierId));
+    setPendingDeletedSupplierIds((prev) => {
+      const next = new Set(prev);
+      next.add(supplierId);
+      return next;
+    });
+  };
+
+  const handleSaveChanges = async () => {
+    if (isSaving) return;
+
+    try {
+      setIsSaving(true);
+
+      if (pendingDeletedSupplierIds.size > 0) {
+        await Promise.all(
+          Array.from(pendingDeletedSupplierIds).map(async (supplierId) => {
+            await deleteSupplierReference(supplierId);
+          })
+        );
+      }
+
+      const pendingContainerRows = containerRows.filter((c) => c._isNew || c._isDeleted || c._dirty);
+      if (pendingContainerRows.length > 0) {
+        for (const c of pendingContainerRows) {
+          if (c._isDeleted && c._dbId) {
+            await deleteContainerReference(c._dbId);
+            continue;
+          }
+
+          if (c._isNew && !c._isDeleted) {
+            await createContainerReference({
+              name: c.name,
+              capacityCbm: c.capacityCbm,
+              maxWeightKg: c.maxWeightKg,
+            });
+            continue;
+          }
+
+          if (c._dbId && c._dirty && !c._isDeleted) {
+            await updateContainerReference(c._dbId, {
+              name: c.name,
+              capacityCbm: c.capacityCbm,
+              maxWeightKg: c.maxWeightKg,
+            });
+          }
+        }
+      }
+
+      if (pendingSkuSpecIds.size > 0) {
+        for (const skuId of Array.from(pendingSkuSpecIds)) {
+          const row = skuSpecRows.find((r) => r.skuId === skuId);
+          if (!row) continue;
+          await updateProductSpecDimensions(row.skuId, {
+            lengthCm: row.lengthCm,
+            widthCm: row.widthCm,
+            heightCm: row.heightCm,
+            weightKg: row.weightKg,
+          });
+        }
+      }
+
+      setPendingDeletedSupplierIds(new Set());
+      setPendingSkuSpecIds(new Set());
+
+      try {
+        const dbContainers = await fetchContainerReference();
+        const rows = dbContainers.map((c) => ({
+          _key: `db-${c.id}`,
+          _dbId: c.id,
+          _dirty: false,
+          _isDeleted: false,
+          _isNew: false,
+          name: c.name,
+          capacityCbm: c.capacityCbm,
+          maxWeightKg: c.maxWeightKg,
+        }));
+        setContainerRows(rows);
+      } catch (err) {
+        console.error('Failed to refresh containers after save:', err);
+      }
+
+      handleSaveNotification();
+    } catch (err) {
+      console.error('Failed to save changes to DB:', err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const Modal = ({ isOpen, onClose, title, children }: any) => {
@@ -96,34 +297,56 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
   );
   };
 
-  const handleAddSupplier = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddSupplier = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const newSupplier: Supplier = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: formData.get('name') as string,
-      email: formData.get('email') as string,
-      standardLeadTime: parseInt(formData.get('leadTime') as string) || 0,
-      rating: 0
-    };
-    setSuppliers([...suppliers, newSupplier]);
-    setIsSupplierModalOpen(false);
-    handleSaveNotification();
+    try {
+      const newSupplier = await createSupplierReference({
+        name: String(formData.get('name') || ''),
+        email: String(formData.get('email') || ''),
+        standardLeadTime: parseInt(String(formData.get('leadTime') || '0'), 10) || 0,
+      });
+
+      setSuppliers((prev) => [...prev, newSupplier].sort((a, b) => a.name.localeCompare(b.name)));
+      setIsSupplierModalOpen(false);
+      handleSaveNotification();
+    } catch (err) {
+      console.error('Failed to create supplier in DB:', err);
+    }
   };
 
   //Helper to add Container
   const handleAddContainer = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const newContainer: ContainerType = {
+    const newContainer: EditableContainer = {
+      _key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      _isNew: true,
+      _isDeleted: false,
+      _dirty: true,
       name: formData.get('name') as string,
       capacityCbm: parseFloat(formData.get('cbm') as string) || 0,
       maxWeightKg: parseFloat(formData.get('kg') as string) || 0,
     };
-    setContainers([...containers, newContainer]);
+    setContainerRows((prev) => [...prev, newContainer]);
     setIsContainerModalOpen(false);
     handleSaveNotification();
   };
+
+  const visibleContainers = useMemo(
+    () => containerRows.filter((c) => !c._isDeleted),
+    [containerRows]
+  );
+
+  useEffect(() => {
+    setContainers(
+      visibleContainers.map(({ name, capacityCbm, maxWeightKg }) => ({
+        name,
+        capacityCbm,
+        maxWeightKg,
+      }))
+    );
+  }, [visibleContainers, setContainers]);
 
   return (
     <div className="space-y-6">
@@ -183,6 +406,7 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                           type="text" 
                           value={s.name} 
                           onChange={(e) => updateSupplier(s.id, 'name', e.target.value)}
+                          onBlur={(e) => persistSupplier(s.id, 'name', e.target.value)}
                           className="w-full bg-transparent font-bold text-slate-800 border-0 focus:ring-1 focus:ring-blue-500 rounded px-2 outline-none"
                         />
                       </td>
@@ -191,6 +415,7 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                           type="email" 
                           value={s.email} 
                           onChange={(e) => updateSupplier(s.id, 'email', e.target.value)}
+                          onBlur={(e) => persistSupplier(s.id, 'email', e.target.value)}
                           className="w-full bg-transparent text-slate-600 border-0 focus:ring-1 focus:ring-blue-500 rounded px-2 outline-none"
                         />
                       </td>
@@ -199,11 +424,16 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                           type="number" 
                           value={s.standardLeadTime} 
                           onChange={(e) => updateSupplier(s.id, 'standardLeadTime', parseInt(e.target.value))}
+                          onBlur={(e) => persistSupplier(s.id, 'standardLeadTime', parseInt(e.target.value))}
                           className="w-20 text-center bg-slate-50 border border-slate-100 rounded-lg py-1 font-bold text-blue-600"
                         />
                       </td>
                       <td className="py-4 text-center">
-                        <button className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                        <button
+                          onClick={() => handleDeleteSupplier(s.id)}
+                          className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                          title="Delete supplier"
+                        >
                           <Trash2 size={16} />
                         </button>
                       </td>
@@ -232,13 +462,16 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {containers.map((c, idx) => (
-                <div key={idx} className="p-6 border border-slate-100 rounded-3xl bg-slate-50/50 hover:bg-white hover:border-blue-200 transition-all group">
+              {visibleContainers.map((c) => (
+                <div key={c._key} className="p-6 border border-slate-100 rounded-3xl bg-slate-50/50 hover:bg-white hover:border-blue-200 transition-all group">
                   <div className="flex justify-between items-start mb-6">
                     <div className="p-3 rounded-2xl bg-blue-100 text-blue-600">
                       <Container size={24} />
                     </div>
-                    <button className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">
+                    <button
+                      onClick={() => handleDeleteContainer(c._key)}
+                      className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"
+                    >
                       <Trash2 size={18} />
                     </button>
                   </div>
@@ -248,7 +481,7 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                       <input 
                         type="text" 
                         value={c.name} 
-                        onChange={(e) => updateContainer(idx, 'name', e.target.value)}
+                        onChange={(e) => updateContainer(c._key, 'name', e.target.value)}
                         className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
@@ -258,7 +491,7 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                         <input 
                           type="number" 
                           value={c.capacityCbm} 
-                          onChange={(e) => updateContainer(idx, 'capacityCbm', parseFloat(e.target.value))}
+                          onChange={(e) => updateContainer(c._key, 'capacityCbm', parseFloat(e.target.value))}
                           className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
@@ -267,7 +500,7 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
                         <input 
                           type="number" 
                           value={c.maxWeightKg} 
-                          onChange={(e) => updateContainer(idx, 'maxWeightKg', parseFloat(e.target.value))}
+                          onChange={(e) => updateContainer(c._key, 'maxWeightKg', parseFloat(e.target.value))}
                           className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
@@ -372,14 +605,19 @@ const SpecUpdate: React.FC<Props> = ({ skus, setSkus, suppliers, setSuppliers, c
         <div className="p-8 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <div className="flex items-center gap-2 text-slate-500">
             <AlertCircle size={16} />
-            <p className="text-xs italic">All changes are updated in the local session state.</p>
+            <p className="text-xs italic">
+              {(pendingDeletedSupplierIds.size > 0 || pendingSkuSpecIds.size > 0 || containerRows.some((c) => c._isDeleted || c._isNew || c._dirty))
+                ? `Pending: ${pendingDeletedSupplierIds.size} supplier delete(s), ${containerRows.filter((c) => c._isDeleted || c._isNew || c._dirty).length} container change(s), ${pendingSkuSpecIds.size} SKU spec change(s). Click Save Changes to apply in DB.`
+                : 'All changes are updated in the local session state.'}
+            </p>
           </div>
           <button 
-            onClick={handleSaveNotification}
-            className="flex items-center gap-2 bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 active:scale-95"
+            onClick={handleSaveChanges}
+            disabled={isSaving}
+            className="flex items-center gap-2 bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-200 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {saveStatus ? <CheckCircle2 size={20} /> : <Save size={20} />}
-            {saveStatus ? 'Changes Applied' : 'Save Changes'}
+            {isSaving ? 'Saving...' : saveStatus ? 'Changes Applied' : 'Save Changes'}
           </button>
         </div>
         {/* Supplier Modal */}
