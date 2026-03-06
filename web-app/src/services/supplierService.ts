@@ -1,4 +1,5 @@
-import { apiGetListAll, apiPatch, apiPost } from "./apiClient";
+import { apiDelete, apiGetListAll, apiPatch, apiPost } from "./apiClient";
+import type { Supplier } from "../../types";
 
 type CsvRow = Record<string, string>;
 
@@ -168,4 +169,73 @@ export async function fetchSupplierListing(): Promise<SupplierListing[]> {
     }))
     .filter((row) => !!row.id && !!row.name)
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function toSupplierModel(row: SupplierRow): Supplier {
+  return {
+    id: String(row.supplier_id),
+    name: (row.supplier_name || "").trim(),
+    email: (row.email || "").trim(),
+    standardLeadTime: Number(row.lead_time_days) || 0,
+    rating: 0,
+  };
+}
+
+export async function fetchSupplierReference(): Promise<Supplier[]> {
+  const rows = await apiGetListAll<SupplierRow>(ENTITY_SUPPLIER);
+
+  return rows
+    .map(toSupplierModel)
+    .filter((row) => !!row.id && !!row.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function createSupplierReference(input: {
+  name: string;
+  email?: string;
+  standardLeadTime?: number;
+}): Promise<Supplier> {
+  const payload = {
+    supplier_name: (input.name || "").trim(),
+    email: (input.email || "").trim() || null,
+    lead_time_days: Number(input.standardLeadTime) || 0,
+  };
+
+  if (!payload.supplier_name) {
+    throw new Error("Supplier name is required");
+  }
+
+  const created = await apiPost<SupplierRow>(
+    ENTITY_SUPPLIER,
+    payload as Record<string, unknown>
+  );
+
+  return toSupplierModel(created);
+}
+
+export async function updateSupplierReference(
+  supplierId: string,
+  patch: Partial<Pick<Supplier, "name" | "email" | "standardLeadTime">>
+): Promise<void> {
+  const idNum = Number(supplierId);
+  if (!Number.isFinite(idNum)) {
+    throw new Error(`Invalid supplier id: ${supplierId}`);
+  }
+
+  const payload: Record<string, unknown> = {};
+
+  if (patch.name != null) payload.supplier_name = String(patch.name).trim();
+  if (patch.email != null) payload.email = String(patch.email).trim() || null;
+  if (patch.standardLeadTime != null) payload.lead_time_days = Number(patch.standardLeadTime) || 0;
+
+  await apiPatch(ENTITY_SUPPLIER, "supplier_id", idNum, payload);
+}
+
+export async function deleteSupplierReference(supplierId: string): Promise<void> {
+  const idNum = Number(supplierId);
+  if (!Number.isFinite(idNum)) {
+    throw new Error(`Invalid supplier id: ${supplierId}`);
+  }
+
+  await apiDelete(ENTITY_SUPPLIER, "supplier_id", idNum);
 }

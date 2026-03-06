@@ -1,4 +1,4 @@
-import { apiGetListAll, apiPatch, apiPost } from "./apiClient";
+import { apiDelete, apiGetListAll, apiPatch, apiPost } from "./apiClient";
 
 type CsvRow = Record<string, string>;
 
@@ -7,6 +7,13 @@ type ContainerRow = {
   container_type?: string | null;
   max_vol_cbm?: number | null;
   max_vol_kg?: number | null;
+};
+
+export type ContainerReference = {
+  id: number;
+  name: string;
+  capacityCbm: number;
+  maxWeightKg: number;
 };
 
 const ENTITY_CONTAINER = "ContainerSpecs";
@@ -147,4 +154,61 @@ export async function uploadContainerCsv(file: File) {
     updated,
     errors,
   };
+}
+
+function toContainerReference(row: ContainerRow): ContainerReference {
+  return {
+    id: row.container_id,
+    name: (row.container_type || "").trim(),
+    capacityCbm: Number(row.max_vol_cbm) || 0,
+    maxWeightKg: Number(row.max_vol_kg) || 0,
+  };
+}
+
+export async function fetchContainerReference(): Promise<ContainerReference[]> {
+  const rows = await apiGetListAll<ContainerRow>(ENTITY_CONTAINER);
+
+  return rows
+    .map(toContainerReference)
+    .filter((row) => !!row.id && !!row.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function createContainerReference(input: {
+  name: string;
+  capacityCbm?: number;
+  maxWeightKg?: number;
+}): Promise<ContainerReference> {
+  const payload = {
+    container_type: (input.name || "").trim(),
+    max_vol_cbm: Number(input.capacityCbm) || 0,
+    max_vol_kg: Number(input.maxWeightKg) || 0,
+  };
+
+  if (!payload.container_type) {
+    throw new Error("Container name is required");
+  }
+
+  const created = await apiPost<ContainerRow>(
+    ENTITY_CONTAINER,
+    payload as Record<string, unknown>
+  );
+
+  return toContainerReference(created);
+}
+
+export async function updateContainerReference(
+  containerId: number,
+  patch: Partial<Pick<ContainerReference, "name" | "capacityCbm" | "maxWeightKg">>
+): Promise<void> {
+  const payload: Record<string, unknown> = {};
+  if (patch.name != null) payload.container_type = String(patch.name).trim();
+  if (patch.capacityCbm != null) payload.max_vol_cbm = Number(patch.capacityCbm) || 0;
+  if (patch.maxWeightKg != null) payload.max_vol_kg = Number(patch.maxWeightKg) || 0;
+
+  await apiPatch(ENTITY_CONTAINER, "container_id", containerId, payload);
+}
+
+export async function deleteContainerReference(containerId: number): Promise<void> {
+  await apiDelete(ENTITY_CONTAINER, "container_id", containerId);
 }

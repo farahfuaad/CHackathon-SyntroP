@@ -16,6 +16,9 @@ function normalizeSkuKey(v: string) {
 const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [cartSkuIds, setCartSkuIds] = useState<string[]>([]);
+  const [lastAddedSkuId, setLastAddedSkuId] = useState<string | null>(null);
+  const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [rows, setRows] = useState<InventorySkuListing[]>([]);
   const [ams3mBySku, setAms3mBySku] = useState<Map<string, number>>(new Map());
   const [supplierOptions, setSupplierOptions] = useState<SupplierListing[]>([]);
@@ -96,6 +99,38 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
 
   const selectedWarehouseTotal = selectedWarehouseDetailsForDisplay.reduce((sum, item) => sum + item.quantity, 0);
 
+  const cartRows = useMemo(() => {
+    const bySku = new Map(rows.map((row) => [normalizeSkuKey(row.skuId), row] as const));
+    return cartSkuIds
+      .map((skuId) => bySku.get(normalizeSkuKey(skuId)))
+      .filter((row): row is InventorySkuListing => Boolean(row));
+  }, [cartSkuIds, rows]);
+
+  useEffect(() => {
+    if (!lastAddedSkuId) return;
+    const t = window.setTimeout(() => setLastAddedSkuId(null), 1800);
+    return () => window.clearTimeout(t);
+  }, [lastAddedSkuId]);
+
+  const handleAddSkuToCart = (skuId: string) => {
+    setCartSkuIds((prev) => {
+      if (prev.includes(skuId)) return prev;
+      return [...prev, skuId];
+    });
+    setLastAddedSkuId(skuId);
+  };
+
+  const handleRemoveSkuFromCart = (skuId: string) => {
+    setCartSkuIds((prev) => prev.filter((id) => id !== skuId));
+  };
+
+  const handleCheckoutCart = () => {
+    if (!cartSkuIds.length) return;
+    cartSkuIds.forEach((skuId) => onAddToPlanning(skuId));
+    setCartSkuIds([]);
+    setIsCartOpen(false);
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
       
@@ -128,8 +163,26 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
               ))}
             </select>
           </div>
+          <button
+            onClick={() => setIsCartOpen(true)}
+            className="relative px-3 py-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all flex items-center gap-2"
+          >
+            <ShoppingCart size={16} />
+            Cart
+            {cartSkuIds.length > 0 && (
+              <span className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+                {cartSkuIds.length}
+              </span>
+            )}
+          </button>
         </div>
       </div>
+
+      {lastAddedSkuId && (
+        <div className="px-4 py-2 border-b border-slate-100 bg-green-50 text-green-700 text-xs font-semibold">
+          Added to cart: {lastAddedSkuId}
+        </div>
+      )}
 
       {/* 2. Table Section: Displaying the SKUs */}
       <div className="overflow-x-auto">
@@ -170,6 +223,10 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                 const ams3m = ams3mBySku.get(skuKey) ?? 0;
                 const stockLast = ams3m > 0 ? (row.totalStock / ams3m).toFixed(1) : '0.0';
                 const isLow = Number(stockLast) < 1.5;
+                const hasIncoming = row.incoming > 0;
+                const derivedStatus = !hasIncoming && row.inHand === 0
+                  ? (ams3m > 0 ? 'inactive' : 'new')
+                  : null;
 
                 return (
                   <tr
@@ -181,9 +238,22 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                       <div className="flex flex-col gap-1">
                         <span className="font-bold text-slate-900">{row.modelName || '-'}</span>
                         <span className="text-xs text-slate-400">{row.skuId}</span>
-                        <span className="inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
-                          {row.categoryLabel}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
+                            {row.categoryLabel}
+                          </span>
+                          {derivedStatus && (
+                            <span
+                              className={`inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
+                                derivedStatus === 'inactive'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-cyan-100 text-cyan-700'
+                              }`}
+                            >
+                              {derivedStatus}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-4 text-center font-medium text-slate-600">{row.backorder}</td>
@@ -202,9 +272,10 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onAddToPlanning(row.skuId);
+                          handleAddSkuToCart(row.skuId);
                         }}
                         className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                        title={cartSkuIds.includes(row.skuId) ? 'Already in cart' : 'Add to cart'}
                       >
                         <ShoppingCart size={18} />
                       </button>
@@ -307,6 +378,69 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {isCartOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-slate-900/45 p-4 flex items-center justify-center"
+          onClick={() => setIsCartOpen(false)}
+        >
+          <div
+            className="w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Cart Items</h3>
+                <p className="text-sm text-slate-500">{cartRows.length} SKU(s) selected for planning</p>
+              </div>
+              <button
+                onClick={() => setIsCartOpen(false)}
+                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close cart"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {cartRows.length === 0 ? (
+              <p className="px-5 py-8 text-sm text-slate-500">Cart is empty. Add items using the cart icon in each row.</p>
+            ) : (
+              <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-100">
+                {cartRows.map((row) => (
+                  <div key={row.skuId} className="px-5 py-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{row.modelName || '-'}</p>
+                      <p className="text-xs text-slate-500">{row.skuId}</p>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveSkuFromCart(row.skuId)}
+                      className="text-xs font-semibold text-red-600 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="px-5 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setIsCartOpen(false)}
+                className="px-3 py-2 text-xs font-bold rounded-lg border border-slate-300 text-slate-600"
+              >
+                Continue Selecting
+              </button>
+              <button
+                onClick={handleCheckoutCart}
+                disabled={cartRows.length === 0}
+                className="px-4 py-2 text-xs font-bold rounded-lg text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Checkout to Container Planner
+              </button>
+            </div>
           </div>
         </div>
       )}
