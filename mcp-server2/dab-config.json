@@ -1,0 +1,654 @@
+{
+  "$schema": "https://github.com/Azure/data-api-builder/releases/download/v1.6.87/dab.draft.schema.json",
+  "data-source": {
+    "database-type": "mssql",
+    "connection-string": "@env('MSSQL_CONNECTION_STRING')",
+    "options": {
+      "set-session-context": false
+    }
+  },
+  "runtime": {
+    "rest": {
+      "enabled": true,
+      "path": "/api",
+      "request-body-strict": true
+    },
+    "graphql": {
+      "enabled": true,
+      "path": "/graphql",
+      "allow-introspection": true
+    },
+    "host": {
+      "cors": {
+        "origins": [],
+        "allow-credentials": false
+      },
+      "authentication": {
+        "provider": "StaticWebApps"
+      },
+      "mode": "production"
+    }
+  },
+  "entities": {
+    "Product": {
+      "description": "Product master data (SKU, category, dimensions, supplier)",
+      "source": {
+        "object": "dbo.Product",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "sku_id",
+          "description": "Unique product SKU identifier",
+          "primary-key": true
+        },
+        {
+          "name": "sku_model_name",
+          "description": "Model or product name",
+          "primary-key": false
+        },
+        {
+          "name": "category",
+          "description": "Product category",
+          "primary-key": false
+        },
+        {
+          "name": "supplier_id",
+          "description": "Default supplier identifier for this product",
+          "primary-key": false
+        },
+        {
+          "name": "box_length_cm",
+          "description": "Box length in centimeters",
+          "primary-key": false
+        },
+        {
+          "name": "box_width_cm",
+          "description": "Box width in centimeters",
+          "primary-key": false
+        },
+        {
+          "name": "box_height_cm",
+          "description": "Box height in centimeters",
+          "primary-key": false
+        },
+        {
+          "name": "box_weight_kg",
+          "description": "Box weight in kilograms",
+          "primary-key": false
+        },
+        {
+          "name": "is_active",
+          "description": "Whether the product is active (Y/N or boolean)",
+          "primary-key": false
+        },
+        {
+          "name": "is_slowmoving_threshol",
+          "description": "Threshold used to flag slow‑moving SKUs",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "Product",
+          "plural": "Products"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "AccessRoles": {
+      "description": "Application access roles and role names",
+      "source": {
+        "object": "dbo.AccessRoles",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "role_id",
+          "description": "Unique identifier of the role",
+          "primary-key": true
+        },
+        {
+          "name": "role_name",
+          "description": "Human‑readable name of the access role",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "AccessRoles",
+          "plural": "AccessRoles"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "ComplaintIssue": {
+      "description": "Customer or quality complaints captured by SKU and date with issue/cause details",
+      "source": {
+        "object": "dbo.ComplaintIssue",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "issue_id",
+          "description": "Unique complaint/issue identifier",
+          "primary-key": true
+        },
+        {
+          "name": "sku_id",
+          "description": "SKU involved in the complaint",
+          "primary-key": false
+        },
+        {
+          "name": "complaint_date",
+          "description": "Date the complaint was recorded",
+          "primary-key": false
+        },
+        {
+          "name": "issues",
+          "description": "Issue description or category",
+          "primary-key": false
+        },
+        {
+          "name": "cause",
+          "description": "Identified cause for the issue",
+          "primary-key": false
+        },
+        {
+          "name": "failure_count",
+          "description": "Number of failures/occurrences reported",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "ComplaintIssue",
+          "plural": "ComplaintIssues"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "ContainerSpecs": {
+      "description": "Container types and capacity specifications (CBM, kg)",
+      "source": {
+        "object": "dbo.ContainerSpecs",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "container_id",
+          "description": "Unique container identifier",
+          "primary-key": true
+        },
+        {
+          "name": "container_type",
+          "description": "Container type/classification",
+          "primary-key": false
+        },
+        {
+          "name": "max_vol_cbm",
+          "description": "Maximum volume capacity in cubic meters (CBM)",
+          "primary-key": false
+        },
+        {
+          "name": "max_vol_kg",
+          "description": "Maximum weight capacity in kilograms",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "ContainerSpecs",
+          "plural": "ContainerSpecs"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "InventoryStocks": {
+      "description": "Per‑SKU inventory by warehouse, including in‑hand, backorder, incoming and totals",
+      "source": {
+        "object": "dbo.InventoryStocks",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "stock_id",
+          "description": "Unique stock record identifier",
+          "primary-key": true
+        },
+        {
+          "name": "sku_id",
+          "description": "SKU for this inventory record",
+          "primary-key": false
+        },
+        {
+          "name": "warehouse_id",
+          "description": "Warehouse identifier",
+          "primary-key": false
+        },
+        {
+          "name": "in_hand",
+          "description": "Current on‑hand units",
+          "primary-key": false
+        },
+        {
+          "name": "backorder",
+          "description": "Units currently on backorder",
+          "primary-key": false
+        },
+        {
+          "name": "incoming",
+          "description": "Units incoming from suppliers or transfers",
+          "primary-key": false
+        },
+        {
+          "name": "total_stock",
+          "description": "Total stock (computed or stored)",
+          "primary-key": false
+        },
+        {
+          "name": "stock_last_3m",
+          "description": "Total units moved/stocked in the last 3 months",
+          "primary-key": false
+        },
+        {
+          "name": "stock_last_6m",
+          "description": "Total units moved/stocked in the last 6 months",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "InventoryStocks",
+          "plural": "InventoryStocks"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "PR": {
+      "description": "Purchase requests linked to POs, SKU and requested unit quantities",
+      "source": {
+        "object": "dbo.PR",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "pr_id",
+          "description": "Unique purchase request identifier",
+          "primary-key": true
+        },
+        {
+          "name": "po_id",
+          "description": "Related purchase order identifier (if any)",
+          "primary-key": false
+        },
+        {
+          "name": "pr_name",
+          "description": "Short name or title for the PR",
+          "primary-key": false
+        },
+        {
+          "name": "sku_id",
+          "description": "SKU requested",
+          "primary-key": false
+        },
+        {
+          "name": "unit_qty",
+          "description": "Requested unit quantity",
+          "primary-key": false
+        },
+        {
+          "name": "status",
+          "description": "Current PR status",
+          "primary-key": false
+        },
+        {
+          "name": "remarks",
+          "description": "Additional notes or remarks",
+          "primary-key": false
+        },
+        {
+          "name": "createdOn",
+          "description": "Date the PR was created",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "PR",
+          "plural": "PRs"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "ProcurementPlan": {
+      "description": "Procurement plan per PO/SKU with supplier, quantity, ETA and status",
+      "source": {
+        "object": "dbo.ProcurementPlan",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "po_id",
+          "description": "Unique purchase order identifier",
+          "primary-key": true
+        },
+        {
+          "name": "sku_id",
+          "description": "SKU included in this procurement plan",
+          "primary-key": false
+        },
+        {
+          "name": "supplier_id",
+          "description": "Supplier identifier",
+          "primary-key": false
+        },
+        {
+          "name": "po_qty",
+          "description": "Ordered quantity",
+          "primary-key": false
+        },
+        {
+          "name": "expected_eta",
+          "description": "Expected arrival date",
+          "primary-key": false
+        },
+        {
+          "name": "status",
+          "description": "Order status",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "ProcurementPlan",
+          "plural": "ProcurementPlans"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "sales": {
+      "description": "Monthly sales by SKU, including units sold and average monthly sales (AMS)",
+      "source": {
+        "object": "dbo.sales",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "sales_id",
+          "description": "Unique sales record identifier",
+          "primary-key": true
+        },
+        {
+          "name": "sku_id",
+          "description": "SKU sold",
+          "primary-key": false
+        },
+        {
+          "name": "month",
+          "description": "Sales month (period)",
+          "primary-key": false
+        },
+        {
+          "name": "units_sold",
+          "description": "Units sold during the month",
+          "primary-key": false
+        },
+        {
+          "name": "ams_3m",
+          "description": "Average monthly sales over last 3 months",
+          "primary-key": false
+        },
+        {
+          "name": "ams_6m",
+          "description": "Average monthly sales over last 6 months",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "sales",
+          "plural": "sales"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "supplier": {
+      "description": "Supplier master data including contact and lead time",
+      "source": {
+        "object": "dbo.supplier",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "supplier_id",
+          "description": "Unique supplier identifier",
+          "primary-key": true
+        },
+        {
+          "name": "supplier_name",
+          "description": "Supplier name",
+          "primary-key": false
+        },
+        {
+          "name": "email",
+          "description": "Supplier contact email]",
+          "primary-key": false
+        },
+        {
+          "name": "lead_time_days",
+          "description": "Typical supplier lead time in days",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "supplier",
+          "plural": "suppliers"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "UserAccess": {
+      "description": "Application user accounts mapped to roles",
+      "source": {
+        "object": "dbo.UserAccess",
+        "type": "table",
+        "key-fields": [
+          "user_id"
+        ]
+      },
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "UserAccess",
+          "plural": "UserAccesses"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    },
+    "warehouse": {
+      "description": "Warehouse master with codes/names and optional SKU quantities",
+      "source": {
+        "object": "dbo.warehouse",
+        "type": "table"
+      },
+      "fields": [
+        {
+          "name": "warehouse_id",
+          "description": "Unique warehouse identifier",
+          "primary-key": true
+        },
+        {
+          "name": "warehouse_code",
+          "description": "Short warehouse code",
+          "primary-key": false
+        },
+        {
+          "name": "warehouse_name",
+          "description": "Warehouse name",
+          "primary-key": false
+        },
+        {
+          "name": "sku_id",
+          "description": "SKU tracked at the warehouse (if denormalized)",
+          "primary-key": false
+        },
+        {
+          "name": "unit_qty",
+          "description": "Quantity of the SKU in this warehouse (if populated)",
+          "primary-key": false
+        }
+      ],
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "warehouse",
+          "plural": "warehouses"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "anonymous",
+          "actions": [
+            {
+              "action": "read"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "azure-cli": "^0.10.20"
+  }
+}
