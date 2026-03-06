@@ -170,6 +170,10 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                 const ams3m = ams3mBySku.get(skuKey) ?? 0;
                 const stockLast = ams3m > 0 ? (row.totalStock / ams3m).toFixed(1) : '0.0';
                 const isLow = Number(stockLast) < 1.5;
+                const hasIncoming = row.incoming > 0;
+                const derivedStatus = !hasIncoming && row.inHand === 0
+                  ? (ams3m > 0 ? 'inactive' : 'new')
+                  : null;
 
                 return (
                   <tr
@@ -181,9 +185,22 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                       <div className="flex flex-col gap-1">
                         <span className="font-bold text-slate-900">{row.modelName || '-'}</span>
                         <span className="text-xs text-slate-400">{row.skuId}</span>
-                        <span className="inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
-                          {row.categoryLabel}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
+                            {row.categoryLabel}
+                          </span>
+                          {derivedStatus && (
+                            <span
+                              className={`inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
+                                derivedStatus === 'inactive'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-cyan-100 text-cyan-700'
+                              }`}
+                            >
+                              {derivedStatus}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-4 text-center font-medium text-slate-600">{row.backorder}</td>
