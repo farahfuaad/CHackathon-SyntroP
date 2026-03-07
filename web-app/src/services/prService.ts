@@ -1,7 +1,9 @@
 import { apiDelete, apiGetListAll, apiPatch, apiPost } from "./apiClient";
+import { PurchaseRequisition } from '../../types';
 
 const ENTITY_PR = "PR";
 const ENTITY_PR_LINE = "PRLine";
+const VALID_PR_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED'] as const;
 
 export type PrStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "PENDING";
 
@@ -39,6 +41,7 @@ export type PrUiItem = {
   containerId?: number;
   status: PrStatus;
   remarks?: string;
+  emailSentAt?: string;
   createdOn?: string;
   updatedOn?: string;
   lines: PrUiLineItem[];
@@ -196,13 +199,17 @@ export async function saveDraftPr(input: CreatePrWithLinesInput): Promise<PrUiIt
 
 export async function updatePr(
   prId: string,
-  patch: Partial<Pick<PrUiItem, "title" | "containerId" | "status" | "remarks" | "updatedOn">>
+  patch: Partial<Pick<PrUiItem, "title" | "containerId" | "status" | "remarks" | "emailSentAt" | "updatedOn">>
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
   if (patch.title !== undefined) payload.pr_title = patch.title?.trim() || null;
   if (patch.containerId !== undefined) payload.container_id = patch.containerId ?? null;
   if (patch.status !== undefined) payload.status = patch.status;
   if (patch.remarks !== undefined) payload.remarks = patch.remarks?.trim() || null;
+  // Keep queue API compatible: if emailSentAt is provided, persist the nearest available timestamp column.
+  if (patch.emailSentAt !== undefined && patch.updatedOn === undefined) {
+    payload.updatedOn = toIsoDateTime(patch.emailSentAt);
+  }
   if (patch.updatedOn !== undefined) payload.updatedOn = toIsoDateTime(patch.updatedOn);
 
   await apiPatch(ENTITY_PR, "pr_id", prId, payload);
@@ -217,4 +224,52 @@ export async function deletePr(prId: string): Promise<void> {
   }
 
   await apiDelete(ENTITY_PR, "pr_id", prId);
+}
+
+export async function fetchPrWithLines(): Promise<PurchaseRequisition[]> {
+  const [headers, lines] = await Promise.all([
+    apiGetListAll<PrHeaderRow>(ENTITY_PR),
+    apiGetListAll<PrLineRow>(ENTITY_PR_LINE),
+  ]);
+
+  const byPrId = new Map<string, PrLineRow[]>();
+  for (const line of lines) {
+    const key = (line.pr_id || "").trim();
+    if (!key) continue;
+    const arr = byPrId.get(key) || [];
+    arr.push(line);
+    byPrId.set(key, arr);
+  }
+
+  return headers
+    .map((header) => {
+      const id = (header.pr_id || "").trim();
+      const lineItems = byPrId.get(id) || [];
+      return {
+        id,
+        title: (header.pr_title || id || "Untitled PR").trim(),
+        containerType: header.container_id != null ? `Container #${header.container_id}` : "N/A",
+        utilizationCbm: 0,
+        utilizationWeight: 0,
+        status: normalizeStatus(header.status),
+        createdAt: header.createdOn || new Date().toISOString(),
+        emailSentAt: undefined,
+        updatedOn: header.updatedOn || undefined,
+        items: lineItems.map((line) => ({
+          skuId: (line.sku_id || "").trim(),
+          model: (line.sku_id || "Unknown").trim() || "Unknown",
+          qty: Number(line.unit_qty) || 0,
+          supplierId: line.supplier_id != null ? String(line.supplier_id) : undefined,
+        })),
+      } as PurchaseRequisition;
+    })
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+function normalizeStatus(value: unknown): PurchaseRequisition['status'] {
+  const s = String(value ?? 'DRAFT').toUpperCase();
+  if (s === 'SUBMITTED') return 'PENDING';
+  return (VALID_PR_STATUSES as readonly string[]).includes(s)
+    ? (s as PurchaseRequisition['status'])
+    : 'DRAFT';
 }

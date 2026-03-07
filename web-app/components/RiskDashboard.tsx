@@ -1,6 +1,8 @@
 
-import React, { useState } from 'react';
-import { SKU } from '../types';
+import React, { useMemo, useState } from 'react';
+import type { InventorySkuListing } from '../src/services/productDetailService';
+import type { SupplierListing } from '../src/services/supplierService';
+import type { ComplaintAggBySku } from '../src/services/complaintService';
 import { 
   ShieldAlert, 
   History, 
@@ -18,26 +20,115 @@ import {
 import { BarChart as ReBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface Props {
-  skus: SKU[];
+  inventory: InventorySkuListing[];
+  amsMap: Map<string, number>;
+  complaintMap: Map<string, ComplaintAggBySku>;
+  suppliers: SupplierListing[];
+  loading: boolean;
+  onNavigate?: (tab: string) => void;
 }
 
-const RiskDashboard: React.FC<Props> = ({ skus }) => {
-  const [selectedSku, setSelectedSku] = useState<SKU | null>(null);
-  const [aiAction, setAiAction] = useState<string>('');
-  const [loadingAction, setLoadingAction] = useState(false);
+const DASHBOARD_TOP_N = 5;
+const LEAD_TIME_THRESHOLD_DAYS = 30;
+const RELIABILITY_THRESHOLD = 0.9;
 
-  const chartData = skus.map(s => ({
-    name: s.model,
-    failureRate: s.failureRate * 100,
-    defects: s.defectsCount
-  }));
+type SlowMovingItem = {
+  skuId: string;
+  model: string;
+  ams: number;
+  totalStock: number;
+  stockMonths: number;
+  reason: string;
+};
 
-  const handleItemClick = async (sku: SKU) => {
-    setSelectedSku(sku);
-    setLoadingAction(true);
-    setAiAction(`Recommendation for SKU ${sku.model}: Consider reducing inventory levels and reviewing supplier performance.`);
-    setLoadingAction(false);
-  };
+const SLOW_MOVING_THRESHOLD_MONTHS = 6;
+
+const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppliers, loading, onNavigate }) => {
+  const [selectedItem, setSelectedItem] = useState<SlowMovingItem | null>(null);
+
+  // ── Derived data ──────────────────────────────────────────────────
+
+  // Quality chart: failure rate relative to AMS, per SKU with complaints
+  const chartData = useMemo(() => {
+    const items: { name: string; failureRate: number; defects: number }[] = [];
+    complaintMap.forEach((agg) => {
+      const inv = inventory.find((i) => i.skuId === agg.skuId);
+      const ams = amsMap.get(agg.skuId) ?? 0;
+      const failureRate = ams > 0 ? (agg.totalFailures / (ams * 3)) * 100 : (agg.totalFailures > 0 ? 100 : 0);
+      items.push({
+        name: inv?.modelName || agg.skuId,
+        failureRate: Math.min(failureRate, 100),
+        defects: agg.totalFailures,
+      });
+    });
+    return items.sort((a, b) => b.failureRate - a.failureRate).slice(0, DASHBOARD_TOP_N);
+  }, [inventory, amsMap, complaintMap]);
+
+  // Slow moving: stock months > threshold or zero AMS with stock on hand
+  const slowMovingItems = useMemo(() => {
+    const items: SlowMovingItem[] = [];
+    inventory.forEach((row) => {
+      const ams = amsMap.get(row.skuId) ?? 0;
+      const stockMonths = ams > 0 ? row.totalStock / ams : (row.totalStock > 0 ? Infinity : 0);
+
+      if (stockMonths > SLOW_MOVING_THRESHOLD_MONTHS) {
+        items.push({
+          skuId: row.skuId,
+          model: row.modelName || row.skuId,
+          ams,
+          totalStock: row.totalStock,
+          stockMonths: Number.isFinite(stockMonths) ? stockMonths : 999,
+          reason: ams === 0 ? 'Zero sales (3m)' : `${stockMonths.toFixed(1)} months of stock`,
+        });
+      }
+    });
+    return items.sort((a, b) => b.stockMonths - a.stockMonths);
+  }, [inventory, amsMap]);
+
+  const slowMovingTop5 = slowMovingItems.slice(0, DASHBOARD_TOP_N);
+
+  // Supplier lead time: link inventory SKUs to their supplier
+  const supplierMap = useMemo(() => {
+    const map = new Map<string, SupplierListing>();
+    suppliers.forEach((s) => map.set(s.id, s));
+    return map;
+  }, [suppliers]);
+
+  const leadTimeRows = useMemo(() => {
+    return inventory
+      .filter((row) => row.supplierId)
+      .map((row) => {
+        const sup = supplierMap.get(row.supplierId);
+        const complaints = complaintMap.get(row.skuId);
+        const ams = amsMap.get(row.skuId) ?? 0;
+        // Reliability proxy: lower if many complaints relative to sales
+        let reliability = 1;
+        if (complaints && ams > 0) {
+          reliability = Math.max(0, 1 - complaints.totalFailures / (ams * 3));
+        } else if (complaints && complaints.totalFailures > 0) {
+          reliability = Math.max(0, 1 - complaints.totalFailures / 100);
+        }
+        return {
+          skuId: row.skuId,
+          model: row.modelName || row.skuId,
+          category: row.categoryLabel,
+          leadTimeDays: sup?.leadTimeDays ?? 0,
+          supplierName: sup?.name ?? 'Unknown',
+          reliability,
+        };
+      })
+      .filter((row) => row.reliability < RELIABILITY_THRESHOLD || row.leadTimeDays > LEAD_TIME_THRESHOLD_DAYS)
+      .sort((a, b) => b.leadTimeDays - a.leadTimeDays)
+      .slice(0, DASHBOARD_TOP_N);
+  }, [inventory, supplierMap, complaintMap, amsMap]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20 text-slate-400 gap-2">
+        <Loader2 size={20} className="animate-spin" /> Loading dashboard data…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 relative">
@@ -48,26 +139,30 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
             <div className="bg-red-50 p-2 rounded-xl text-red-500">
               <ShieldAlert size={20} />
             </div>
-            <h3 className="text-lg font-bold text-slate-800">Quality Tracking</h3>
+            <h3 className="text-lg font-bold text-slate-800">Top Quality Issues</h3>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <ReBarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" fontSize={10} tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis fontSize={10} tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} label={{ value: 'Failure %', angle: -90, position: 'insideLeft', fontSize: 10 }} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                  cursor={{ fill: '#f8fafc' }}
-                />
-                <Bar dataKey="failureRate" radius={[6, 6, 0, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.failureRate > 5 ? '#ef4444' : '#3b82f6'} />
-                  ))}
-                </Bar>
-              </ReBarChart>
-            </ResponsiveContainer>
-          </div>
+          {chartData.length === 0 ? (
+            <p className="text-sm text-slate-400 py-12 text-center">No complaint data available.</p>
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <ReBarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" fontSize={10} tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <YAxis fontSize={10} tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} label={{ value: 'Failure %', angle: -90, position: 'insideLeft', fontSize: 10 }} />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                    cursor={{ fill: '#f8fafc' }}
+                  />
+                  <Bar dataKey="failureRate" radius={[6, 6, 0, 0]}>
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.failureRate > 5 ? '#ef4444' : '#3b82f6'} />
+                    ))}
+                  </Bar>
+                </ReBarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         {/* Slow Moving Identification */}
@@ -77,43 +172,57 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
               <div className="bg-amber-50 p-2 rounded-xl text-amber-500">
                 <History size={20} />
               </div>
-              <h3 className="text-lg font-bold text-slate-800">Slow Moving Analysis</h3>
+              <h3 className="text-lg font-bold text-slate-800">Slow Moving Alerts</h3>
             </div>
-            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full uppercase">Action Required</span>
+            {slowMovingItems.length > 0 && (
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full uppercase">{slowMovingItems.length} Alert{slowMovingItems.length !== 1 ? 's' : ''}</span>
+            )}
           </div>
           <div className="space-y-3">
-            {skus.filter(s => s.isSlowMoving).map(s => (
-              <button 
-                key={s.id} 
-                onClick={() => handleItemClick(s)}
-                className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-300 hover:bg-white hover:shadow-md transition-all group"
-              >
-                <div className="text-left">
-                  <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors">{s.model}</h4>
-                  <p className="text-[10px] text-slate-500 font-medium">Aging Status: {s.exclusionReason || 'Low demand'}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right hidden sm:block">
-                    <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">STAGNANT</span>
+            {slowMovingTop5.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4 text-center">No slow-moving SKUs detected.</p>
+            ) : (
+              slowMovingTop5.map((item) => (
+                <button 
+                  key={item.skuId} 
+                  onClick={() => setSelectedItem(item)}
+                  className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-300 hover:bg-white hover:shadow-md transition-all group"
+                >
+                  <div className="text-left">
+                    <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors">{item.model}</h4>
+                    <p className="text-[10px] text-slate-500 font-medium">Aging Status: {item.reason}</p>
                   </div>
-                  <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all" />
-                </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right hidden sm:block">
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">STAGNANT</span>
+                    </div>
+                    <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all" />
+                  </div>
+                </button>
+              ))
+            )}
+            {slowMovingItems.length > DASHBOARD_TOP_N && (
+              <button
+                onClick={() => onNavigate?.('planning')}
+                className="w-full text-center text-sm font-semibold text-blue-600 hover:text-blue-700 pt-2 transition-colors flex items-center justify-center gap-1"
+              >
+                View All <ChevronRight size={16} />
               </button>
-            ))}
+            )}
           </div>
         </div>
       </div>
 
-      {/* Supplier Reliability (BR2) - Table Format */}
+      {/* Supplier Risk Alerts */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <div className="bg-blue-50 p-2 rounded-xl text-blue-500">
               <Clock size={20} />
             </div>
-            <h3 className="text-lg font-bold text-slate-800">Lead Time & Reliability</h3>
+            <h3 className="text-lg font-bold text-slate-800">Supplier Risk Alerts</h3>
           </div>
-          <p className="text-xs text-slate-500 mt-1 ml-11">Precise reorder timing and safety stock depth mapping for each model.</p>
+          <p className="text-xs text-slate-500 mt-1 ml-11">Suppliers with reliability &lt; 90% or lead time &gt; {LEAD_TIME_THRESHOLD_DAYS} days.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -126,34 +235,37 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {skus.map(s => (
-                <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+              {leadTimeRows.length === 0 && (
+                <tr><td colSpan={4} className="px-8 py-8 text-sm text-slate-400 text-center">No supplier risk alerts.</td></tr>
+              )}
+              {leadTimeRows.map((row) => (
+                <tr key={row.skuId} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
                         <PackageSearch size={16} />
                       </div>
                       <div>
-                        <span className="text-sm font-bold text-slate-900 block">{s.model}</span>
-                        <span className="text-[10px] text-slate-400">{s.id}</span>
+                        <span className="text-sm font-bold text-slate-900 block">{row.model}</span>
+                        <span className="text-[10px] text-slate-400">{row.skuId}</span>
                       </div>
                     </div>
                   </td>
                   <td className="px-8 py-5 text-center">
-                    <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg uppercase">{s.category}</span>
+                    <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg uppercase">{row.category}</span>
                   </td>
                   <td className="px-8 py-5 text-center">
-                    <span className="text-sm font-bold text-blue-600">{s.leadTimeDays} Days</span>
+                    <span className="text-sm font-bold text-blue-600">{row.leadTimeDays} Days</span>
                   </td>
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-4">
                       <div className="flex-1 bg-slate-100 h-1.5 rounded-full overflow-hidden">
                         <div 
-                          className={`h-full rounded-full transition-all duration-700 ${s.supplierReliability > 0.8 ? 'bg-green-500' : 'bg-amber-500'}`} 
-                          style={{ width: `${s.supplierReliability * 100}%` }}
+                          className={`h-full rounded-full transition-all duration-700 ${row.reliability > 0.8 ? 'bg-green-500' : 'bg-amber-500'}`} 
+                          style={{ width: `${row.reliability * 100}%` }}
                         />
                       </div>
-                      <span className="text-xs font-bold text-slate-700 w-12 text-right">{(s.supplierReliability * 100).toFixed(0)}%</span>
+                      <span className="text-xs font-bold text-slate-700 w-12 text-right">{(row.reliability * 100).toFixed(0)}%</span>
                     </div>
                   </td>
                 </tr>
@@ -164,7 +276,7 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
       </div>
 
       {/* Detail Action Overlay (Drawer) */}
-      {selectedSku && (
+      {selectedItem && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex justify-end animate-in fade-in duration-300">
           <div className="w-full max-w-xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-500">
             {/* Drawer Header */}
@@ -179,7 +291,7 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
                 </div>
               </div>
               <button 
-                onClick={() => setSelectedSku(null)}
+                onClick={() => setSelectedItem(null)}
                 className="p-2 hover:bg-slate-100 rounded-full transition-colors"
               >
                 <X size={24} className="text-slate-400" />
@@ -196,24 +308,15 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
                 <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 grid grid-cols-2 gap-6">
                   <div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Model / SKU</p>
-                    <p className="font-bold text-slate-900">{selectedSku.model}</p>
-                    <p className="text-xs text-slate-500">{selectedSku.id}</p>
+                    <p className="font-bold text-slate-900">{selectedItem.model}</p>
+                    <p className="text-xs text-slate-500">{selectedItem.skuId}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">AMS (Last 3m)</p>
-                    <p className="font-bold text-slate-900">{selectedSku.ams} Units</p>
+                    <p className="font-bold text-slate-900">{selectedItem.ams.toFixed(1)} Units</p>
                   </div>
                   <div className="col-span-2">
-                    <p className="text-[10px] text-slate-400 font-bold uppercase mb-2">Stock Locations (Total: {Object.values(selectedSku.inStock).reduce((a, b) => a + (b as number), 0)})</p>
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(selectedSku.inStock).map(([cat, val]) => (
-                        val > 0 && (
-                          <span key={cat} className="text-[10px] font-bold bg-white border border-slate-200 px-2 py-1 rounded-lg">
-                            {cat}: {val}
-                          </span>
-                        )
-                      ))}
-                    </div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mb-2">Total Stock: {selectedItem.totalStock}</p>
                   </div>
                 </div>
               </section>
@@ -225,7 +328,7 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
                   <h4 className="font-bold text-blue-900 text-sm">Action Requirement Analysis</h4>
                 </div>
                 <p className="text-sm text-blue-800 leading-relaxed font-medium">
-                  This SKU has effectively <strong>{((Object.values(selectedSku.inStock).reduce((a, b) => a + (b as number), 0)) / (selectedSku.ams || 1)).toFixed(0)} months</strong> of stock in hand. 
+                  This SKU has effectively <strong>{Number.isFinite(selectedItem.stockMonths) ? selectedItem.stockMonths.toFixed(0) : '∞'} months</strong> of stock in hand. 
                   Immediate liquidation is required to free up warehouse slotting.
                 </p>
               </section>
@@ -236,8 +339,7 @@ const RiskDashboard: React.FC<Props> = ({ skus }) => {
               <button 
                 className="flex-1 bg-slate-900 text-white font-bold py-4 rounded-2xl shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 flex items-center justify-center gap-2"
                 onClick={() => {
-                   alert(`Inventory action for ${selectedSku.model} has been recorded.`);
-                   setSelectedSku(null);
+                   setSelectedItem(null);
                 }}
               >
                 <ArrowRightCircle size={20} />

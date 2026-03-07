@@ -1,7 +1,7 @@
-
-import React, { useState } from 'react';
-import { SKU, PurchaseRequisition, Supplier } from '../types';
+import React, { useState, useEffect } from 'react';
+import { SKU, PurchaseRequisition } from '../types';
 import { MOCK_SUPPLIERS } from '../constants';
+import { fetchPrWithLines, updatePr } from '../src/services/prService';
 import { 
   CheckCircle, 
   XCircle, 
@@ -9,7 +9,6 @@ import {
   ChevronDown,
   ChevronUp,
   CalendarDays,
-  Mail,
   Download,
   FileText,
   UserCheck,
@@ -19,65 +18,131 @@ import {
 
 interface Props {
   skus: SKU[];
-  prs: PurchaseRequisition[];
-  setPrs: React.Dispatch<React.SetStateAction<PurchaseRequisition[]>>;
   buParams: any;
 }
 
-const ManagementInsights: React.FC<Props> = ({ skus, prs, setPrs }) => {
+const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams }) => {
+  const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedPr, setExpandedPr] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionLabel, setActionLabel] = useState<string>('');
   const [selectedHistoryPr, setSelectedHistoryPr] = useState<PurchaseRequisition | null>(null);
 
-  const pendingPrs = prs.filter(p => p.status === 'DRAFT');
-  const historyPrs = prs.filter(p => p.status !== 'DRAFT');
+  useEffect(() => {
+    let mounted = true;
+
+    const loadQueue = async () => {
+      try {
+        setIsLoading(true);
+        setFetchError(null);
+
+        const data = await fetchPrWithLines();
+        if (!mounted) return;
+
+        const safeData = Array.isArray(data) ? (data as PurchaseRequisition[]) : [];
+        setPrs(safeData);
+      } catch (err) {
+        console.error('Failed to fetch PR queue:', err);
+        if (mounted) setFetchError('Failed to load purchase requisitions. Please refresh and try again.');
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    loadQueue();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const pendingPrs = prs.filter(p => p.status === 'PENDING');
+  const historyPrs = prs.filter(p => p.status === 'APPROVED' || p.status === 'REJECTED');
 
   const handleApprove = async (id: string) => {
+    if (processingId) return;
+
     setProcessingId(id);
     setActionLabel('Approving & Notifying...');
+
+    const now = new Date().toISOString();
     
-    // BR 2: Simulate sending email to Approvers and Suppliers
-    await new Promise(r => setTimeout(r, 1200));
-    console.log(`Email sent to Approvers and Suppliers for PR ${id}`);
-    
-    setPrs(prev => prev.map(p => p.id === id ? { 
-      ...p, 
-      status: 'APPROVED', 
-      emailSentAt: new Date().toISOString() 
-    } : p));
-    
-    setProcessingId(null);
-    setExpandedPr(null);
+    try {
+      await updatePr(id, {
+        status: "APPROVED",
+        emailSentAt: now,
+        updatedOn: now,
+      });
+
+      console.log(`Email sent to Approvers and Suppliers for PR ${id}`);
+      
+      setPrs(prev => prev.map(p => p.id === id ? { 
+        ...p, 
+        status: 'APPROVED' as const, 
+        emailSentAt: now,
+        updatedOn: now,
+      } : p));
+    } catch (err) {
+      console.error("Failed to approve PR:", err);
+      alert("Failed to approve PR. Please try again.");
+    } finally {
+      setProcessingId(null);
+      setExpandedPr(null);
+      setActionLabel('');
+    }
   };
 
   const handleReject = async (id: string) => {
+    if (processingId) return;
+
     setProcessingId(id);
     setActionLabel('Rejecting & Notifying Procurement...');
-    
-    // BR 2: Simulate sending email to Procurement Team
-    await new Promise(r => setTimeout(r, 1000));
-    console.log(`Email sent to Procurement Team for rejection of PR ${id}`);
 
-    setPrs(prev => prev.map(p => p.id === id ? { 
-      ...p, 
-      status: 'REJECTED'
-    } : p));
+    const now = new Date().toISOString();
     
-    setProcessingId(null);
-    setExpandedPr(null);
+    try {
+      await updatePr(id, {
+        status: "REJECTED",
+        updatedOn: now,
+      });
+
+      console.log(`Email sent to Procurement Team for rejection of PR ${id}`);
+
+      setPrs(prev => prev.map(p => p.id === id ? { 
+        ...p, 
+        status: 'REJECTED' as const,
+        updatedOn: now,
+      } : p));
+    } catch (err) {
+      console.error("Failed to reject PR:", err);
+      alert("Failed to reject PR. Please try again.");
+    } finally {
+      setProcessingId(null);
+      setExpandedPr(null);
+      setActionLabel('');
+    }
   };
 
   const downloadPackingList = (pr: PurchaseRequisition, supplierId: string) => {
     const supplier = MOCK_SUPPLIERS.find(s => s.id === supplierId);
     const supplierItems = pr.items.filter(i => i.supplierId === supplierId);
+
+    if (supplierItems.length === 0) {
+      alert('No line items found for this supplier.');
+      return;
+    }
+
+    const supplierName = supplier?.name ?? `Supplier_${supplierId}`;
+    const supplierEmail = supplier?.email ?? 'N/A';
     
     const content = `
 APPROVED PACKING LIST - FIAMMA GROUP
 ------------------------------------
 PR ID: ${pr.id}
 Date: ${new Date().toLocaleDateString()}
-Supplier: ${supplier?.name} (${supplier?.email})
+Supplier: ${supplierName} (${supplierEmail})
 Container Type: ${pr.containerType}
 
 ITEMS:
@@ -86,14 +151,19 @@ ${supplierItems.map(i => `- ${i.model} (${i.skuId}): ${i.qty} units`).join('\n')
 Utilization: Vol ${pr.utilizationCbm.toFixed(1)}%, Weight ${pr.utilizationWeight.toFixed(1)}%
 ------------------------------------
 STATUS: SYSTEM APPROVED
-    `;
+    `.trim();
     
-    const blob = new Blob([content], { type: 'text/plain' });
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    const safeName = supplierName.replace(/[^\w.-]+/g, '_');
+
     a.href = url;
-    a.download = `${pr.id}_PackingList_${supplier?.name.replace(/\s+/g, '_')}.txt`;
+    a.download = `${pr.id}_PackingList_${safeName}.txt`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -106,7 +176,7 @@ STATUS: SYSTEM APPROVED
               <UserCheck size={24} />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-slate-800 tracking-tight">Queue and Approvals (BR 1)</h3>
+              <h3 className="text-xl font-bold text-slate-800 tracking-tight">Queue and Approvals </h3>
               <p className="text-sm text-slate-500 font-medium">Manage and process pending purchase requisitions</p>
             </div>
           </div>
@@ -117,9 +187,22 @@ STATUS: SYSTEM APPROVED
             </div>
           </div>
         </div>
+
+        {fetchError && (
+          <div className="mb-4 bg-red-50 border border-red-100 rounded-2xl p-4 flex items-start gap-3">
+            <AlertCircle size={18} className="text-red-600 mt-0.5" />
+            <p className="text-xs text-red-800">{fetchError}</p>
+          </div>
+        )}
         
         <div className="space-y-4">
-          {pendingPrs.length === 0 ? (
+          {isLoading ? (
+            <div className="text-center py-16 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+              <Loader2 className="mx-auto text-blue-500 mb-4 animate-spin" size={48} />
+              <p className="text-slate-500 font-bold text-lg">Loading PR Queue...</p>
+              <p className="text-slate-400 text-sm mt-1">Fetching purchase requisitions from database.</p>
+            </div>
+          ) : pendingPrs.length === 0 ? (
             <div className="text-center py-16 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
               <Clock className="mx-auto text-slate-300 mb-4" size={48} />
               <p className="text-slate-500 font-bold text-lg">Requisition Queue Empty</p>
@@ -163,7 +246,7 @@ STATUS: SYSTEM APPROVED
                         <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Line Items Breakdown</h5>
                         <div className="space-y-3">
                           {pr.items.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-slate-100">
+                            <div key={`${item.skuId}-${idx}`} className="flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-slate-100">
                               <div>
                                 <p className="text-sm font-bold text-slate-800">{item.model}</p>
                                 <p className="text-[10px] text-slate-500">{item.skuId}</p>
@@ -193,20 +276,24 @@ STATUS: SYSTEM APPROVED
                             <div className="bg-slate-900 text-white rounded-2xl p-8 flex flex-col items-center text-center">
                               <Loader2 className="animate-spin mb-4" size={32} />
                               <h4 className="font-bold mb-1">{actionLabel}</h4>
-                              <p className="text-slate-400 text-[10px] uppercase tracking-widest">Simulating Email Protocol...</p>
+                              <p className="text-slate-400 text-[10px] uppercase tracking-widest">Processing Request...</p>
                             </div>
                           ) : (
                             <div className="space-y-3">
                               <button 
+                                type="button"
+                                disabled={!!processingId}
                                 onClick={() => handleApprove(pr.id)}
-                                className="w-full bg-green-600 text-white font-bold py-4 rounded-2xl hover:bg-green-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-200 active:scale-95"
+                                className="w-full bg-green-600 text-white font-bold py-4 rounded-2xl hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-200 active:scale-95"
                               >
                                 <CheckCircle size={18} />
-                                Approve and Email (BR 2)
+                                Approve and Email 
                               </button>
                               <button 
+                                type="button"
+                                disabled={!!processingId}
                                 onClick={() => handleReject(pr.id)}
-                                className="w-full bg-white border border-red-200 text-red-600 font-bold py-4 rounded-2xl hover:bg-red-50 transition-all flex items-center justify-center gap-2 active:scale-95"
+                                className="w-full bg-white border border-red-200 text-red-600 font-bold py-4 rounded-2xl hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 active:scale-95"
                               >
                                 <XCircle size={18} />
                                 Reject
@@ -271,10 +358,10 @@ STATUS: SYSTEM APPROVED
                     </td>
                     <td className="px-6 py-4 border-y border-slate-100 text-sm font-bold text-slate-700">{pr.utilizationCbm.toFixed(0)}%</td>
                     <td className="px-6 py-4 border-y border-slate-100 text-xs text-slate-500">
-                      {pr.emailSentAt ? new Date(pr.emailSentAt).toLocaleDateString() : 'N/A'}
+                      {(pr.updatedOn || pr.emailSentAt) ? new Date(pr.updatedOn || pr.emailSentAt as string).toLocaleDateString() : 'N/A'}
                     </td>
                     <td className="px-6 py-4 border-y border-r border-slate-100 rounded-r-2xl text-right">
-                      <button className="text-blue-600 font-bold text-xs hover:underline">View Details</button>
+                      <button type="button" className="text-blue-600 font-bold text-xs hover:underline">View Details</button>
                     </td>
                   </tr>
                 ))}
@@ -301,6 +388,7 @@ STATUS: SYSTEM APPROVED
                 </div>
               </div>
               <button 
+                type="button"
                 onClick={() => setSelectedHistoryPr(null)}
                 className="p-2 hover:bg-white rounded-xl transition-colors text-slate-400 hover:text-slate-600"
               >
@@ -328,7 +416,7 @@ STATUS: SYSTEM APPROVED
                 <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Line Items</h5>
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
                   {selectedHistoryPr.items.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center p-3 bg-white border border-slate-100 rounded-xl">
+                    <div key={`${item.skuId}-${idx}`} className="flex justify-between items-center p-3 bg-white border border-slate-100 rounded-xl">
                       <div>
                         <p className="text-sm font-bold text-slate-800">{item.model}</p>
                         <p className="text-[10px] text-slate-500">{item.skuId}</p>
@@ -343,10 +431,17 @@ STATUS: SYSTEM APPROVED
                 <div className="space-y-4">
                   <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Supplier Documents</h5>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {Array.from(new Set(selectedHistoryPr.items.map(i => i.supplierId))).map((sId: string) => {
+                    {Array.from(
+                      new Set(
+                        selectedHistoryPr.items
+                          .map(i => i.supplierId)
+                          .filter((v): v is string => !!v)
+                      )
+                    ).map((sId) => {
                       const supplier = MOCK_SUPPLIERS.find(s => s.id === sId);
                       return (
                         <button 
+                          type="button"
                           key={sId}
                           onClick={() => downloadPackingList(selectedHistoryPr, sId)}
                           className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl hover:border-blue-400 group transition-all"
@@ -354,7 +449,7 @@ STATUS: SYSTEM APPROVED
                           <div className="flex items-center gap-3">
                             <FileText size={18} className="text-slate-400 group-hover:text-blue-500" />
                             <div className="text-left">
-                              <p className="text-[10px] font-bold text-slate-900">{supplier?.name}</p>
+                              <p className="text-[10px] font-bold text-slate-900">{supplier?.name ?? `Supplier ${sId}`}</p>
                               <p className="text-[9px] text-slate-500 uppercase tracking-tight">Packing List</p>
                             </div>
                           </div>
@@ -376,6 +471,7 @@ STATUS: SYSTEM APPROVED
 
             <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
               <button 
+                type="button"
                 onClick={() => setSelectedHistoryPr(null)}
                 className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-bold hover:bg-slate-800 transition-all active:scale-95"
               >
@@ -389,4 +485,4 @@ STATUS: SYSTEM APPROVED
   );
 };
 
-export default ManagementInsights;
+export default QueueApprovals;
