@@ -1,7 +1,8 @@
-
-import React, { useState } from 'react';
+import React, { useState } from "react";
+import { createPrWithLines, saveDraftPr } from "../src/services/prService";
+import { fetchContainerReference } from "../src/services/containerService";
 import { SKU, ContainerType, PurchaseRequisition, PlanningDraft } from '../types';
-import { Box, Calculator, FileDown, Trash2, Loader2, Save, History, ChevronRight } from 'lucide-react';
+import { Box, Calculator, FileDown, Trash2, Loader2, Save, History, ChevronRight, Container } from 'lucide-react';
 
 interface Props {
   skus: SKU[];
@@ -20,11 +21,11 @@ interface Props {
   onGeneratePr: (pr: PurchaseRequisition) => void;
 }
 
-const ContainerPlanner: React.FC<Props> = ({ 
-  skus, 
-  containerTypes, 
-  selectedSkus, 
-  setSelectedSkus, 
+const ContainerPlanner: React.FC<Props> = ({
+  skus,
+  containerTypes,
+  selectedSkus,
+  setSelectedSkus,
   planningTitle,
   setPlanningTitle,
   currentDraftId,
@@ -34,11 +35,11 @@ const ContainerPlanner: React.FC<Props> = ({
   drafts,
   onSaveDraft,
   onLoadDraft,
-  onGeneratePr 
+  onGeneratePr
 }) => {
   const containerType = containerTypes.find(c => c.name === selectedContainerName) || containerTypes[0];
-  const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingPr, setIsSavingPr] = useState(false);
 
   const removeSku = (skuId: string) => {
     setSelectedSkus(selectedSkus.filter(s => s.skuId !== skuId));
@@ -71,49 +72,132 @@ const ContainerPlanner: React.FC<Props> = ({
 
   const stats = calculateUtilization();
 
-  const handleGenerate = async () => {
-    setIsGenerating(true);
-    await new Promise(r => setTimeout(r, 1500));
+  const resolveContainerId = async (): Promise<number> => {
+    const selected = containerTypes.find((c) => c.name === selectedContainerName) as (ContainerType & { id?: number }) | undefined;
+    const localId = Number(selected?.id);
 
-    const newPr: PurchaseRequisition = {
-      id: `PR-${Date.now().toString().slice(-6)}`,
-      title: planningTitle,
-      items: selectedSkus.map(item => {
-        const sku = skus.find(s => s.id === item.skuId);
-        return {
-          skuId: item.skuId,
-          model: sku?.model || 'Unknown',
-          qty: item.qty,
-          supplierId: sku?.supplierId || 'Unknown'
-        };
-      }),
-      containerType: containerType.name,
-      utilizationCbm: stats.volPercent,
-      utilizationWeight: stats.weightPercent,
-      status: 'DRAFT',
-      createdAt: new Date().toISOString()
-    };
+    if (Number.isFinite(localId) && localId > 0) return localId;
 
-    onGeneratePr(newPr);
-    setIsGenerating(false);
+    const refs = await fetchContainerReference();
+    const hit = refs.find(
+      (r) => r.name.trim().toLowerCase() === selectedContainerName.trim().toLowerCase()
+    );
+
+    if (hit?.id) return hit.id;
+    throw new Error("Selected container is not mapped in DB.");
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
+    const validSelections = selectedSkus.filter((x) => x?.skuId?.trim() && Number(x.qty) > 0);
+    if (!validSelections.length) {
+      alert("Please add at least one SKU with qty > 0 before saving draft.");
+      return;
+    }
+
     setIsSaving(true);
-    const draftId = currentDraftId || `DRAFT-${Date.now().toString().slice(-6)}`;
-    
-    const newDraft: PlanningDraft = {
-      id: draftId,
-      title: planningTitle,
-      items: selectedSkus,
-      containerType: selectedContainerName,
-      updatedAt: new Date().toLocaleString()
-    };
-    
-    setTimeout(() => {
+    const draftId = currentDraftId || `PR-${Date.now().toString().slice(-10)}`;
+
+    try {
+      const containerId = await resolveContainerId();
+
+      await saveDraftPr({
+        id: draftId,
+        title: planningTitle?.trim() || "Shipment Draft",
+        containerId,
+        status: "DRAFT",
+        items: validSelections.map((item) => {
+          const sku = skus.find((s) => s.id === item.skuId);
+          const rawSupplier = Number((sku as any)?.supplierId);
+          return {
+            skuId: item.skuId,
+            supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
+            unitQty: Number(item.qty) || 0,
+            status: "DRAFT",
+          };
+        }),
+      });
+
+      const newDraft: PlanningDraft = {
+        id: draftId,
+        title: planningTitle,
+        items: selectedSkus,
+        containerType: selectedContainerName,
+        updatedAt: new Date().toLocaleString(),
+      };
+
       onSaveDraft(newDraft);
+      setCurrentDraftId(draftId);
+      alert("Draft saved.");
+    } catch (e) {
+      console.error("Failed to save draft PR:", e);
+      alert("Selected container is not mapped in DB. Upload Container Specs first.");
+    } finally {
       setIsSaving(false);
-    }, 800);
+    }
+  };
+
+  const handleGeneratePr = async () => {
+    const validSelections = selectedSkus.filter(
+      (x) => x?.skuId?.trim() && Number(x.qty) > 0
+    );
+
+    if (!validSelections.length) {
+      alert("Please select at least one SKU with qty > 0.");
+      return;
+    }
+
+    const prName = planningTitle?.trim() || `PR ${new Date().toISOString().slice(0, 10)}`;
+    const prId = `PR-${Date.now().toString().slice(-10)}`;
+    const util = calculateUtilization();
+
+    try {
+      setIsSavingPr(true);
+      const containerId = await resolveContainerId();
+
+      await createPrWithLines({
+        id: prId,
+        title: prName,
+        containerId, // always persisted to PR.container_id
+        status: "SUBMITTED",
+        items: validSelections.map(item => {
+          const sku = skus.find(s => s.id === item.skuId);
+          const rawSupplier = Number((sku as any)?.supplierId);
+          return {
+            skuId: item.skuId,
+            supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
+            unitQty: item.qty,
+            status: "SUBMITTED",
+          };
+        }),
+      });
+
+      const newPr: PurchaseRequisition = {
+        id: prId,
+        title: prName,
+        items: validSelections.map(item => {
+          const sku = skus.find(s => s.id === item.skuId);
+          return {
+            skuId: item.skuId,
+            model: sku?.model || item.skuId || 'Unknown',
+            qty: item.qty,
+            supplierId: sku?.supplierId || 'Unknown'
+          };
+        }),
+        containerType: selectedContainerName,
+        utilizationCbm: (util.cbm / containerType.capacityCbm) * 100,
+        utilizationWeight: (util.kg / containerType.maxWeightKg) * 100,
+        status: 'SUBMITTED',
+        createdAt: new Date().toISOString()
+      };
+
+      onGeneratePr(newPr);
+      alert("PR saved successfully.");
+    } catch (error) {
+      console.error("Failed to save PR:", error);
+      alert("Failed to save PR. Check container mapping/API.");
+    } finally {
+      setIsSavingPr(false);
+    }
   };
 
   return (
@@ -157,22 +241,26 @@ const ContainerPlanner: React.FC<Props> = ({
               )}
               {selectedSkus.map(item => {
                 const sku = skus.find(s => s.id === item.skuId);
-                if (!sku) return null;
+
+                const modelLabel = sku?.model || item.skuId || "Unknown SKU";
+
                 return (
                   <div key={item.skuId} className="flex items-center gap-4 p-4 border border-slate-100 rounded-xl hover:border-blue-100 hover:shadow-sm transition-all">
                     <div className="h-10 w-10 bg-slate-100 rounded flex items-center justify-center text-slate-400">
                       <Box size={20} />
                     </div>
                     <div className="flex-1">
-                      <h4 className="text-sm font-bold text-slate-800">{sku.model}</h4>
+                      <h4 className="text-sm font-bold text-slate-800">{modelLabel}</h4>
                       <p className="text-[10px] text-slate-500 uppercase tracking-tighter">
-                        Dim: {sku.dimensions.l}x{sku.dimensions.w}x{sku.dimensions.h}cm • {sku.weight}kg
+                        {sku
+                          ? `Dim: ${sku.dimensions.l}x${sku.dimensions.w}x${sku.dimensions.h}cm • ${sku.weight}kg`
+                          : `SKU: ${item.skuId} • Specs unavailable`}
                       </p>
                     </div>
                     <div className="w-32">
                       <div className="relative">
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           value={item.qty}
                           onChange={(e) => updateQty(item.skuId, parseInt(e.target.value) || 0)}
                           className="w-full text-right border border-slate-200 rounded-lg px-3 py-1.5 font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 outline-none pr-8"
@@ -180,7 +268,7 @@ const ContainerPlanner: React.FC<Props> = ({
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">QTY</span>
                       </div>
                     </div>
-                    <button 
+                    <button
                       onClick={() => removeSku(item.skuId)}
                       className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
                     >
@@ -197,8 +285,8 @@ const ContainerPlanner: React.FC<Props> = ({
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm sticky top-8">
             <div className="flex items-center gap-2 mb-6">
-              <Calculator className="text-blue-500" />
-              <h3 className="text-lg font-bold text-slate-800">Utilization Analysis</h3>
+              <Container className="text-blue-500" />
+              <h3 className="text-lg font-bold text-slate-800">Container Utilization</h3>
             </div>
 
             <div className="mb-6">
@@ -250,14 +338,14 @@ const ContainerPlanner: React.FC<Props> = ({
 
             <div className="mt-8 pt-6 border-t border-slate-100">
               <button 
-                disabled={selectedSkus.length === 0 || isGenerating}
-                onClick={handleGenerate}
+                disabled={selectedSkus.length === 0 || isSavingPr}
+                onClick={handleGeneratePr}
                 className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transition-all active:scale-95"
               >
-                {isGenerating ? (
+                {isSavingPr ? (
                   <>
                     <Loader2 size={20} className="animate-spin" />
-                    Generating...
+                    Saving PR...
                   </>
                 ) : (
                   <>

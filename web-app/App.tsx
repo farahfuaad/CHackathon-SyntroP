@@ -10,7 +10,8 @@ import {
   PencilRuler,
   ListStart,
   Upload,
-  LogOut
+  LogOut,
+  Sheet
 } from 'lucide-react';
 import {
   SKU,
@@ -29,6 +30,12 @@ import SpecUpdate from './components/SpecUpdate';
 import DataUpload from './components/DataUpload';
 import SignIn from './components/SignIn';
 import { authenticateUserByDb, type AuthenticatedUser } from './src/services/userAccessService';
+import { fetchPrList, type PrUiItem, type PrUiLineItem } from './src/services/prService';
+import { fetchContainerReference } from './src/services/containerService';
+import {
+  fetchInventoryListingBySku,
+  fetchProductSpecListing,
+} from './src/services/productDetailService';
 
 // local type to fix missing BUParameters export
 type BUParameters = {
@@ -72,18 +79,23 @@ function App() {
   };
 
   const handleAddToPlanning = (skuId: string) => {
-    if (!plannedSkus.find(s => s.skuId === skuId)) {
-      setPlannedSkus([...plannedSkus, { skuId, qty: 100 }]);
-    }
+    const cleanSkuId = (skuId || '').trim().toUpperCase();
+    if (!cleanSkuId) return;
+
+    setPlannedSkus((prev) => {
+      if (prev.some((s) => (s.skuId || '').trim().toUpperCase() === cleanSkuId)) return prev;
+      return [...prev, { skuId: cleanSkuId, qty: 100 }];
+    });
+
     setActiveTab('container');
   };
 
   const handleGeneratePr = (newPr: PurchaseRequisition) => {
-    setPrs([newPr, ...prs]);
+    setPrs((prev) => [newPr, ...prev]);
     setPlannedSkus([]);
     setPlanningTitle('New Shipment Planning');
     setCurrentDraftId(null);
-    setSelectedContainerName(CONTAINER_TYPES[0]?.name ?? '');
+    setSelectedContainerName(containers[0]?.name ?? '');
     setActiveTab('approvals');
   };
 
@@ -139,9 +151,118 @@ function App() {
     }
   }, []);
 
-  if (!currentUser) {
-    return <SignIn onSignIn={handleSignIn} />;
-  }
+  useEffect(() => {
+    if (!currentUser) {
+      setPrs([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [invRows, specRows] = await Promise.all([
+          fetchInventoryListingBySku(),
+          fetchProductSpecListing(),
+        ]);
+        if (cancelled) return;
+
+        const specBySku = new Map(specRows.map((s) => [s.skuId.trim().toUpperCase(), s]));
+        const stockTemplate = (MOCK_SKUS[0]?.inStock || {}) as Record<string, number>;
+        const stockKeys = Object.keys(stockTemplate);
+
+        const mapped = invRows.map((r) => {
+          const key = (r.skuId || '').trim().toUpperCase();
+          const spec = specBySku.get(key);
+
+          const inStock: Record<string, number> = { ...stockTemplate };
+          stockKeys.forEach((k) => (inStock[k] = 0));
+          if (stockKeys.length) inStock[stockKeys[0]] = Number(r.inHand) || 0;
+
+          return {
+            id: r.skuId,
+            model: r.modelName || r.skuId,
+            category: (r.categoryLabel || 'home') as any,
+            supplierId: r.supplierId || 'Unknown',
+            dimensions: {
+              l: Number(spec?.lengthCm) || 0,
+              w: Number(spec?.widthCm) || 0,
+              h: Number(spec?.heightCm) || 0,
+            },
+            weight: Number(spec?.weightKg) || 0,
+            inStock: inStock as any,
+            incoming: Number(r.incoming) || 0,
+            ams: Math.max(1, Number(r.stockLast3m) / 3 || 1),
+          } as SKU;
+        });
+
+        if (mapped.length) setSkus(mapped);
+      } catch (err) {
+        console.error('Failed to load SKU master from DB:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
+
+  const mapDbPrToUiPr = (pr: PrUiItem): PurchaseRequisition => {
+    const items = (pr.lines || [])
+      .map((line: PrUiLineItem) => {
+        const sku = skus.find((s) => s.id === line.skuId);
+        const supplierFromSku = (sku as any)?.supplierId;
+
+        return {
+          skuId: line.skuId || '',
+          model: sku?.model || line.skuId || 'Unknown',
+          qty: Number(line.unitQty) || 0,
+          supplierId:
+            line.supplierId != null
+              ? String(line.supplierId)
+              : supplierFromSku != null
+                ? String(supplierFromSku)
+                : 'Unknown',
+        };
+      })
+      .filter((x: { skuId: string }) => Boolean(x.skuId));
+
+    const containerName =
+      (containers as Array<{ id?: number; name?: string }>).find(
+        (c: { id?: number }) => Number(c?.id) === Number(pr.containerId)
+      )?.name ||
+      (pr.containerId != null ? `Container #${pr.containerId}` : 'N/A');
+
+    return {
+      id: pr.id,
+      title: pr.title || pr.id,
+      items,
+      containerType: containerName,
+      utilizationCbm: 0,
+      utilizationWeight: 0,
+      status: (pr.status as any) || 'DRAFT',
+      createdAt: pr.createdOn || new Date().toISOString(),
+    };
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const dbPrs = await fetchPrList();
+        if (cancelled) return;
+        setPrs(dbPrs.map(mapDbPrToUiPr));
+      } catch (err) {
+        console.error('Failed to load PR list:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, containers, skus]);
 
   const SidebarItem = ({ id, label, icon: Icon }: { id: any, label: string, icon: any }) => (
     <button
@@ -168,8 +289,8 @@ function App() {
 
         <nav className="flex flex-col gap-2">
           <SidebarItem id="dashboard" label="Dashboard" icon={LayoutDashboard} />
-          <SidebarItem id="planning" label="Procurement Sheet" icon={Package} />
-          <SidebarItem id="container" label="Container Planning" icon={Truck} />
+          <SidebarItem id="planning" label="Procurement Sheet" icon={Sheet} />
+          <SidebarItem id="container" label="Shipment Planning" icon={Package} />
           <SidebarItem id="approvals" label="Queue and Approvals" icon={ClipboardClock} />
           <SidebarItem id="spec" label="Specification Update" icon={PencilRuler} />
           <SidebarItem id="data" label="Data Upload" icon={Upload} />
@@ -182,7 +303,7 @@ function App() {
             <h2 className="text-2xl font-bold text-slate-800">
               {activeTab === 'dashboard' && 'Operations Dashboard'}
               {activeTab === 'planning' && 'Procurement Planning Sheet'}
-              {activeTab === 'container' && 'Automated Container Planning'}
+              {activeTab === 'container' && 'Automated Shipment Planning'}
               {activeTab === 'approvals' && 'Queue and Approvals'}
               {activeTab === 'spec' && 'Specification Update'}
               {activeTab === 'data' && 'Data Upload'}

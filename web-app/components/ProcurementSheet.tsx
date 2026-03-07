@@ -126,7 +126,10 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
 
   const handleCheckoutCart = () => {
     if (!cartSkuIds.length) return;
-    cartSkuIds.forEach((skuId) => onAddToPlanning(skuId));
+
+    const uniqueSkuIds = Array.from(new Set(cartSkuIds.map((id) => (id || '').trim()).filter(Boolean)));
+    uniqueSkuIds.forEach((skuId) => onAddToPlanning(skuId));
+
     setCartSkuIds([]);
     setIsCartOpen(false);
   };

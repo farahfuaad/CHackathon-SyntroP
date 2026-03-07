@@ -1,4 +1,3 @@
-
 export enum WarehouseCategory {
   RETAIL = 'BR-NM',
   TIKTOK = 'BR-NM6',
@@ -62,6 +61,9 @@ export interface PRItem {
   supplierId: string;
 }
 
+export type PrStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "PENDING";
+
+// If PurchaseRequisition has an inline status union, replace it with PrStatus:
 export interface PurchaseRequisition {
   id: string;
   title: string;
@@ -69,11 +71,12 @@ export interface PurchaseRequisition {
   containerType: string;
   utilizationCbm: number;
   utilizationWeight: number;
-  status: 'DRAFT' | 'APPROVED' | 'REJECTED';
+  status: PrStatus;
   createdAt: string;
   emailSentAt?: string;
 }
 
+// If PlanningDraft also has status, use PrStatus there too.
 export interface PlanningDraft {
   id: string;
   title: string;
