@@ -335,7 +335,7 @@
       ]
     },
     "PR": {
-      "description": "Purchase requests linked to POs, SKU and requested unit quantities",
+      "description": "Purchase Requisition header",
       "source": {
         "object": "dbo.PR",
         "type": "table"
@@ -343,27 +343,17 @@
       "fields": [
         {
           "name": "pr_id",
-          "description": "Unique purchase request identifier",
+          "description": "Unique purchase requisition identifier",
           "primary-key": true
         },
         {
-          "name": "po_id",
-          "description": "Related purchase order identifier (if any)",
+          "name": "pr_title",
+          "description": "Purchase requisition title",
           "primary-key": false
         },
         {
-          "name": "pr_name",
-          "description": "Short name or title for the PR",
-          "primary-key": false
-        },
-        {
-          "name": "sku_id",
-          "description": "SKU requested",
-          "primary-key": false
-        },
-        {
-          "name": "unit_qty",
-          "description": "Requested unit quantity",
+          "name": "container_id",
+          "description": "Selected container type",
           "primary-key": false
         },
         {
@@ -373,15 +363,34 @@
         },
         {
           "name": "remarks",
-          "description": "Additional notes or remarks",
+          "description": "Notes or remarks",
           "primary-key": false
         },
         {
           "name": "createdOn",
-          "description": "Date the PR was created",
+          "description": "PR created timestamp",
+          "primary-key": false
+        },
+        {
+          "name": "updatedOn",
+          "description": "PR updated timestamp",
           "primary-key": false
         }
       ],
+      "relationships": {
+        "lines": {
+          "target.entity": "PRLine",
+          "cardinality": "many",
+          "source.fields": [ "pr_id" ],
+          "target.fields": [ "pr_id" ]
+        },
+        "container": {
+          "target.entity": "ContainerSpecs",
+          "cardinality": "one",
+          "source.fields": [ "container_id" ],
+          "target.fields": [ "container_id" ]
+        }
+      },
       "graphql": {
         "enabled": true,
         "type": {
@@ -396,28 +405,32 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            { "action": "read" }
           ]
         }
       ]
     },
-    "ProcurementPlan": {
-      "description": "Procurement plan per PO/SKU with supplier, quantity, ETA and status",
+
+    "PRLine": {
+      "description": "Purchase Request line items",
       "source": {
-        "object": "dbo.ProcurementPlan",
+        "object": "dbo.PRLine",
         "type": "table"
       },
       "fields": [
         {
-          "name": "po_id",
-          "description": "Unique purchase order identifier",
+          "name": "pr_line_id",
+          "description": "Unique PR line identifier",
           "primary-key": true
         },
         {
+          "name": "pr_id",
+          "description": "Parent purchase request identifier",
+          "primary-key": false
+        },
+        {
           "name": "sku_id",
-          "description": "SKU included in this procurement plan",
+          "description": "Requested SKU",
           "primary-key": false
         },
         {
@@ -426,26 +439,41 @@
           "primary-key": false
         },
         {
-          "name": "po_qty",
-          "description": "Ordered quantity",
+          "name": "unit_qty",
+          "description": "Requested quantity",
           "primary-key": false
         },
         {
-          "name": "expected_eta",
-          "description": "Expected arrival date",
-          "primary-key": false
-        },
-        {
-          "name": "status",
-          "description": "Order status",
+          "name": "line_status",
+          "description": "Line status",
           "primary-key": false
         }
       ],
+      "relationships": {
+        "pr": {
+          "target.entity": "PR",
+          "cardinality": "one",
+          "source.fields": [ "pr_id" ],
+          "target.fields": [ "pr_id" ]
+        },
+        "product": {
+          "target.entity": "Product",
+          "cardinality": "one",
+          "source.fields": [ "sku_id" ],
+          "target.fields": [ "sku_id" ]
+        },
+        "supplier": {
+          "target.entity": "supplier",
+          "cardinality": "one",
+          "source.fields": [ "supplier_id" ],
+          "target.fields": [ "supplier_id" ]
+        }
+      },
       "graphql": {
         "enabled": true,
         "type": {
-          "singular": "ProcurementPlan",
-          "plural": "ProcurementPlans"
+          "singular": "PRLine",
+          "plural": "PRLines"
         }
       },
       "rest": {
@@ -455,9 +483,7 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            { "action": "read" }
           ]
         }
       ]
