@@ -102,8 +102,8 @@
         }
       ]
     },
-    "ProcurementPlan": {
-      "source": "dbo.ProcurementPlan",
+    "PRLine": {
+      "source": "dbo.PRLine",
       "permissions": [
         {
           "actions": ["*"],
