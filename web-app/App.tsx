@@ -161,44 +161,22 @@ function App() {
 
     (async () => {
       try {
-        const [invRows, specRows] = await Promise.all([
-          fetchInventoryListingBySku(),
-          fetchProductSpecListing(),
-        ]);
-        if (cancelled) return;
+        const refs = await fetchContainerReference();
+        if (cancelled || !refs.length) return;
 
-        const specBySku = new Map(specRows.map((s) => [s.skuId.trim().toUpperCase(), s]));
-        const stockTemplate = (MOCK_SKUS[0]?.inStock || {}) as Record<string, number>;
-        const stockKeys = Object.keys(stockTemplate);
+        const mapped: ContainerType[] = refs.map((r) => ({
+          id: r.id as any,
+          name: r.name,
+          capacityCbm: r.capacityCbm,
+          maxWeightKg: r.maxWeightKg,
+        }));
 
-        const mapped = invRows.map((r) => {
-          const key = (r.skuId || '').trim().toUpperCase();
-          const spec = specBySku.get(key);
-
-          const inStock: Record<string, number> = { ...stockTemplate };
-          stockKeys.forEach((k) => (inStock[k] = 0));
-          if (stockKeys.length) inStock[stockKeys[0]] = Number(r.inHand) || 0;
-
-          return {
-            id: r.skuId,
-            model: r.modelName || r.skuId,
-            category: (r.categoryLabel || 'home') as any,
-            supplierId: r.supplierId || 'Unknown',
-            dimensions: {
-              l: Number(spec?.lengthCm) || 0,
-              w: Number(spec?.widthCm) || 0,
-              h: Number(spec?.heightCm) || 0,
-            },
-            weight: Number(spec?.weightKg) || 0,
-            inStock: inStock as any,
-            incoming: Number(r.incoming) || 0,
-            ams: Math.max(1, Number(r.stockLast3m) / 3 || 1),
-          } as SKU;
-        });
-
-        if (mapped.length) setSkus(mapped);
+        setContainers(mapped);
+        setSelectedContainerName((prev) =>
+          prev && mapped.some((c) => c.name === prev) ? prev : mapped[0]?.name ?? ""
+        );
       } catch (err) {
-        console.error('Failed to load SKU master from DB:', err);
+        console.error("Failed to load container references:", err);
       }
     })();
 

@@ -72,19 +72,35 @@ const ContainerPlanner: React.FC<Props> = ({
 
   const stats = calculateUtilization();
 
+  function normalizeContainerKey(v: string): string {
+    return (v || "")
+      .toLowerCase()
+      .replace(/\(.*?\)/g, "")      // remove "(33.1 CBM)"
+      .replace(/[^a-z0-9]/g, "");   // remove spaces/_/-
+  }
+
   const resolveContainerId = async (): Promise<number> => {
     const selected = containerTypes.find((c) => c.name === selectedContainerName) as (ContainerType & { id?: number }) | undefined;
     const localId = Number(selected?.id);
-
     if (Number.isFinite(localId) && localId > 0) return localId;
 
     const refs = await fetchContainerReference();
-    const hit = refs.find(
-      (r) => r.name.trim().toLowerCase() === selectedContainerName.trim().toLowerCase()
-    );
+    const selectedKey = normalizeContainerKey(selectedContainerName);
+
+    // 1) match by normalized name
+    let hit = refs.find((r) => normalizeContainerKey(r.name) === selectedKey);
+
+    // 2) fallback: match by capacity/weight if name differs
+    if (!hit && selected) {
+      hit = refs.find(
+        (r) =>
+          Number(r.capacityCbm) === Number(selected.capacityCbm) &&
+          Number(r.maxWeightKg) === Number(selected.maxWeightKg)
+      );
+    }
 
     if (hit?.id) return hit.id;
-    throw new Error("Selected container is not mapped in DB.");
+    throw new Error(`Selected container is not mapped in DB: "${selectedContainerName}"`);
   };
 
   const handleSaveDraft = async () => {
