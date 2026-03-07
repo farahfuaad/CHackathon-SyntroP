@@ -36,23 +36,23 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
       try {
         setIsLoading(true);
 
-        // All three fetches run in parallel. fetchAms3mBySku is cached after first
-        // call so every subsequent render (navigation back, etc.) is instant.
-        const [{ listing, warehouseMap }, suppliers, salesAmsMap] = await Promise.all([
-          fetchInventoryListingAndWarehouseMap(),
+        // 1) Critical data first
+        const { listing, warehouseMap } = await fetchInventoryListingAndWarehouseMap();
+        if (!mounted) return;
+        setRows(listing);
+        setWarehouseBySku(warehouseMap);
+        setIsLoading(false); // render table immediately
+
+        // 2) Non-critical data in background
+        const [suppliers, salesAmsMap] = await Promise.all([
           fetchSupplierListing(),
           fetchAms3mBySku(),
         ]);
-
         if (!mounted) return;
-
-        setRows(listing);
         setSupplierOptions(suppliers);
-        setWarehouseBySku(warehouseMap);
         setAms3mBySku(salesAmsMap);
       } catch (err) {
         console.error('Failed to fetch procurement sheet data:', err);
-      } finally {
         if (mounted) setIsLoading(false);
       }
     })();
@@ -362,8 +362,7 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                   <thead className="sticky top-0 bg-white border-b border-slate-100">
                     <tr className="text-left text-slate-500">
                       <th className="px-5 py-2.5 font-semibold">Warehouse</th>
-                      <th className="px-5 py-2.5 font-semibold">Name</th>
-                      <th className="px-5 py-2.5 font-semibold text-right">Qty</th>
+                      <th className="px-5 py-2.5 font-semibold text-right">Quantity</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -372,7 +371,6 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                         key={`${selectedSkuForModal.skuId}-${warehouse.warehouseCode}-${warehouse.warehouseName}`}
                         className="border-b border-slate-50 last:border-b-0"
                       >
-                        <td className="px-5 py-2.5 font-mono text-xs text-slate-700">{warehouse.warehouseCode}</td>
                         <td className="px-5 py-2.5 text-slate-700">{warehouse.warehouseName}</td>
                         <td className="px-5 py-2.5 text-right font-semibold text-slate-900">{warehouse.quantity}</td>
                       </tr>

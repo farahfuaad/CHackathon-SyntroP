@@ -24,7 +24,7 @@ import {
 import { MOCK_SKUS, MOCK_SUPPLIERS, CONTAINER_TYPES } from './constants';
 import ProcurementSheet from './components/ProcurementSheet';
 import RiskDashboard from './components/RiskDashboard';
-import ContainerPlanner from './components/ContainerPlanner';
+import ContainerPlanner from './components/ShipmentPlanner';
 import QueueApprovals from './components/QueueApprovals';
 import SpecUpdate from './components/SpecUpdate';
 import DataUpload from './components/DataUpload';
@@ -82,9 +82,13 @@ function App() {
     const cleanSkuId = (skuId || '').trim().toUpperCase();
     if (!cleanSkuId) return;
 
+    // Keep canonical SKU id from master list (case-safe lookup)
+    const canonicalSkuId =
+      skus.find((s) => (s.id || '').trim().toUpperCase() === cleanSkuId)?.id || cleanSkuId;
+
     setPlannedSkus((prev) => {
       if (prev.some((s) => (s.skuId || '').trim().toUpperCase() === cleanSkuId)) return prev;
-      return [...prev, { skuId: cleanSkuId, qty: 100 }];
+      return [...prev, { skuId: canonicalSkuId, qty: 100 }];
     });
 
     setActiveTab('container');
@@ -92,6 +96,7 @@ function App() {
 
   const handleGeneratePr = (newPr: PurchaseRequisition) => {
     setPrs((prev) => [newPr, ...prev]);
+    setDrafts((prev) => prev.filter((d) => d.id !== newPr.id)); // remove converted draft
     setPlannedSkus([]);
     setPlanningTitle('New Shipment Planning');
     setCurrentDraftId(null);
@@ -223,6 +228,29 @@ function App() {
     };
   };
 
+  const mapDbPrToDraft = (pr: PrUiItem): PlanningDraft => {
+    const items = (pr.lines || [])
+      .map((line: PrUiLineItem) => ({
+        skuId: (line.skuId || "").trim(),
+        qty: Number(line.unitQty) || 0,
+      }))
+      .filter((x) => Boolean(x.skuId));
+
+    const containerName =
+      (containers as Array<{ id?: number; name?: string }>).find(
+        (c: { id?: number }) => Number(c?.id) === Number(pr.containerId)
+      )?.name ||
+      (pr.containerId != null ? `Container #${pr.containerId}` : 'N/A');
+
+    return {
+      id: pr.id,
+      title: pr.title || pr.id,
+      items,
+      containerType: containerName,
+      updatedAt: pr.updatedOn || pr.createdOn || new Date().toISOString(),
+    };
+  };
+
   useEffect(() => {
     if (!currentUser) return;
 
@@ -231,7 +259,12 @@ function App() {
       try {
         const dbPrs = await fetchPrList();
         if (cancelled) return;
-        setPrs(dbPrs.map(mapDbPrToUiPr));
+
+        const dbDrafts = dbPrs.filter((p) => String(p.status).toUpperCase() === "DRAFT");
+        const dbQueue = dbPrs.filter((p) => String(p.status).toUpperCase() !== "DRAFT");
+
+        setDrafts(dbDrafts.map(mapDbPrToDraft));
+        setPrs(dbQueue.map(mapDbPrToUiPr));
       } catch (err) {
         console.error('Failed to load PR list:', err);
       }
