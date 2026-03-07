@@ -67,13 +67,19 @@ export type PrStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "PENDIN
 export interface PurchaseRequisition {
   id: string;
   title: string;
-  items: PRItem[];
   containerType: string;
   utilizationCbm: number;
   utilizationWeight: number;
-  status: PrStatus;
+  status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
   createdAt: string;
   emailSentAt?: string;
+  updatedOn?: string;
+  items: {
+    skuId: string;
+    model: string;
+    qty: number;
+    supplierId?: string;
+  }[];
 }
 
 // If PlanningDraft also has status, use PrStatus there too.

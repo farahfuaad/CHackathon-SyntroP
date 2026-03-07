@@ -1,10 +1,44 @@
-import { apiPost } from './apiClient';
+import { apiGetListAll, apiPost } from './apiClient';
 
 type PreviewRow = {
   col1: string;
   col2: string;
   col3: string;
 };
+
+type ComplaintIssueRow = {
+  issue_id: number;
+  sku_id: string;
+  complaint_date: string;
+  issues: string;
+  cause: string;
+  failure_count: number;
+};
+
+export type ComplaintAggBySku = {
+  skuId: string;
+  totalFailures: number;
+  complaintCount: number;
+};
+
+export async function fetchComplaintAggBySku(): Promise<Map<string, ComplaintAggBySku>> {
+  const rows = await apiGetListAll<ComplaintIssueRow>(COMPLAINT_ENTITY);
+  const map = new Map<string, ComplaintAggBySku>();
+
+  rows.forEach((row) => {
+    const skuId = (row.sku_id || '').trim();
+    if (!skuId) return;
+
+    if (!map.has(skuId)) {
+      map.set(skuId, { skuId, totalFailures: 0, complaintCount: 0 });
+    }
+    const agg = map.get(skuId)!;
+    agg.totalFailures += Number(row.failure_count) || 0;
+    agg.complaintCount += 1;
+  });
+
+  return map;
+}
 
 type UploadResult = {
   total: number;

@@ -35,7 +35,11 @@ import { fetchContainerReference } from './src/services/containerService';
 import {
   fetchInventoryListingBySku,
   fetchProductSpecListing,
+  type InventorySkuListing,
 } from './src/services/productDetailService';
+import { fetchAms3mBySku } from './src/services/salesService';
+import { fetchSupplierListing, type SupplierListing } from './src/services/supplierService';
+import { fetchComplaintAggBySku, type ComplaintAggBySku } from './src/services/complaintService';
 
 // local type to fix missing BUParameters export
 type BUParameters = {
@@ -61,6 +65,14 @@ function App() {
   const [drafts, setDrafts] = useState<PlanningDraft[]>([]);
   const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
   const [uploadedData, setUploadedData] = useState<any>(null);
+
+  // ── Dashboard live data ───────────────────────────────────────────
+  const [dashLoading, setDashLoading] = useState(false);
+  const [dashInventory, setDashInventory] = useState<InventorySkuListing[]>([]);
+  const [dashAmsMap, setDashAmsMap] = useState<Map<string, number>>(new Map());
+  const [dashComplaintMap, setDashComplaintMap] = useState<Map<string, ComplaintAggBySku>>(new Map());
+  const [dashSuppliers, setDashSuppliers] = useState<SupplierListing[]>([]);
+  const [dashPendingPrCount, setDashPendingPrCount] = useState(0);
 
   const [buParams, setBuParams] = useState<BUParameters>({
     leadGrowthTarget: 0,
@@ -275,6 +287,53 @@ function App() {
     };
   }, [currentUser, containers, skus]);
 
+  // ── Dashboard data fetch ──────────────────────────────────────────
+  useEffect(() => {
+    if (!currentUser || activeTab !== 'dashboard') return;
+
+    let cancelled = false;
+    setDashLoading(true);
+
+    (async () => {
+      try {
+        const [inventory, amsMap, complaintMap, supplierList, prList] = await Promise.all([
+          fetchInventoryListingBySku(),
+          fetchAms3mBySku(),
+          fetchComplaintAggBySku(),
+          fetchSupplierListing(),
+          fetchPrList(),
+        ]);
+
+        if (cancelled) return;
+
+        setDashInventory(inventory);
+        setDashAmsMap(amsMap);
+        setDashComplaintMap(complaintMap);
+        setDashSuppliers(supplierList);
+
+        const pendingCount = prList.filter(
+          (p) => { const s = String(p.status).toUpperCase(); return s === 'PENDING' || s === 'SUBMITTED'; }
+        ).length;
+        setDashPendingPrCount(pendingCount);
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err);
+      } finally {
+        if (!cancelled) setDashLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [currentUser, activeTab]);
+
+  // ── Derived dashboard values ──────────────────────────────────────
+  const dashTotalSkus = dashInventory.length;
+
+  const dashCriticalLowStock = dashInventory.filter((row) => {
+    const ams = dashAmsMap.get(row.skuId) ?? 0;
+    if (ams <= 0) return false;
+    return row.totalStock / ams < 1.5;
+  }).length;
+
   const SidebarItem = ({ id, label, icon: Icon }: { id: any, label: string, icon: any }) => (
     <button
       onClick={() => setActiveTab(id)}
@@ -345,11 +404,18 @@ function App() {
           {activeTab === 'dashboard' && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <StatCard title="Total SKUs" value={skus.length} icon={Package} trend="+2%" color="blue" />
-                <StatCard title="Critical Low Stock" value={skus.filter(s => calculateTotalStock(s) / s.ams < 1).length} icon={AlertTriangle} trend="-1" color="red" />
-                <StatCard title="Active Shipments" value={skus.reduce((a, b) => a + (b.incoming > 0 ? 1 : 0), 0)} icon={Truck} trend="+3" color="green" />
+                <StatCard title="Total SKUs" value={dashLoading ? '…' : dashTotalSkus} icon={Package} trend="" color="blue" />
+                <StatCard title="Critical Low Stock" value={dashLoading ? '…' : dashCriticalLowStock} icon={AlertTriangle} trend="" color="red" />
+                <StatCard title="Active Shipments" value={dashLoading ? '…' : dashPendingPrCount} icon={Truck} trend="" color="green" />
               </div>
-              <RiskDashboard skus={skus} />
+              <RiskDashboard
+                inventory={dashInventory}
+                amsMap={dashAmsMap}
+                complaintMap={dashComplaintMap}
+                suppliers={dashSuppliers}
+                loading={dashLoading}
+                onNavigate={(tab) => setActiveTab(tab as any)}
+              />
             </>
           )}
 
@@ -379,8 +445,6 @@ function App() {
           {activeTab === 'approvals' && (
             <QueueApprovals
               skus={skus}
-              prs={prs}
-              setPrs={setPrs}
               buParams={buParams}
             />
           )}
