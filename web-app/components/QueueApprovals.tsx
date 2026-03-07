@@ -385,21 +385,6 @@ STATUS: SYSTEM APPROVED
           </div>
         </div>
       )}
-      
-      <div className="bg-slate-900 p-6 rounded-3xl text-white flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="bg-blue-600 p-2 rounded-xl">
-            <CheckCircle size={20} />
-          </div>
-          <div>
-            <h4 className="font-bold text-sm">Approver Accountability</h4>
-            <p className="text-xs text-slate-400">All actions are logged and synchronized with the supplier communication API.</p>
-          </div>
-        </div>
-        <div className="hidden md:flex gap-2">
-           <span className="text-[9px] font-bold border border-slate-700 px-2 py-1 rounded uppercase tracking-widest text-slate-500">System Log: Active</span>
-        </div>
-      </div>
     </div>
   );
 };

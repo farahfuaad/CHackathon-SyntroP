@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { createPrWithLines, saveDraftPr } from "../src/services/prService";
+import { createPrWithLines, saveDraftPr, updatePr } from "../src/services/prService";
 import { fetchContainerReference } from "../src/services/containerService";
 import { SKU, ContainerType, PurchaseRequisition, PlanningDraft } from '../types';
 import { Box, Calculator, FileDown, Trash2, Loader2, Save, History, ChevronRight, Container } from 'lucide-react';
@@ -37,16 +37,34 @@ const ContainerPlanner: React.FC<Props> = ({
   onLoadDraft,
   onGeneratePr
 }) => {
-  const containerType = containerTypes.find(c => c.name === selectedContainerName) || containerTypes[0];
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingPr, setIsSavingPr] = useState(false);
 
-  const removeSku = (skuId: string) => {
-    setSelectedSkus(selectedSkus.filter(s => s.skuId !== skuId));
+  const containerType = containerTypes.find(c => c.name === selectedContainerName) || containerTypes[0];
+
+  const findSkuById = (skuId: string) => {
+    const key = (skuId || "").trim().toUpperCase();
+    return skus.find((s) => (s.id || "").trim().toUpperCase() === key);
   };
 
   const updateQty = (skuId: string, qty: number) => {
-    setSelectedSkus(selectedSkus.map(s => s.skuId === skuId ? { ...s, qty } : s));
+    const safeQty = Number.isFinite(qty) ? Math.max(0, qty) : 0;
+    const key = (skuId || "").trim().toUpperCase();
+
+    setSelectedSkus((prev) =>
+      prev.map((item) =>
+        (item.skuId || "").trim().toUpperCase() === key
+          ? { ...item, qty: safeQty }
+          : item
+      )
+    );
+  };
+
+  const removeSku = (skuId: string) => {
+    const key = (skuId || "").trim().toUpperCase();
+    setSelectedSkus((prev) =>
+      prev.filter((item) => (item.skuId || "").trim().toUpperCase() !== key)
+    );
   };
 
   const calculateUtilization = () => {
@@ -54,19 +72,22 @@ const ContainerPlanner: React.FC<Props> = ({
     let totalKg = 0;
 
     selectedSkus.forEach(item => {
-      const sku = skus.find(s => s.id === item.skuId);
+      const sku = findSkuById(item.skuId);
       if (sku) {
-        const itemCbm = (sku.dimensions.l * sku.dimensions.w * sku.dimensions.h) / 1000000;
-        totalCbm += itemCbm * item.qty;
-        totalKg += sku.weight * item.qty;
+        const itemCbm = (Number(sku.dimensions.l) * Number(sku.dimensions.w) * Number(sku.dimensions.h)) / 1000000;
+        totalCbm += itemCbm * Number(item.qty || 0);
+        totalKg += Number(sku.weight || 0) * Number(item.qty || 0);
       }
     });
+
+    const capacityCbm = Number(containerType?.capacityCbm) || 0;
+    const maxWeightKg = Number(containerType?.maxWeightKg) || 0;
 
     return {
       cbm: totalCbm,
       kg: totalKg,
-      volPercent: (totalCbm / containerType.capacityCbm) * 100,
-      weightPercent: (totalKg / containerType.maxWeightKg) * 100
+      volPercent: capacityCbm > 0 ? (totalCbm / capacityCbm) * 100 : 0,
+      weightPercent: maxWeightKg > 0 ? (totalKg / maxWeightKg) * 100 : 0
     };
   };
 
@@ -122,7 +143,7 @@ const ContainerPlanner: React.FC<Props> = ({
         containerId,
         status: "DRAFT",
         items: validSelections.map((item) => {
-          const sku = skus.find((s) => s.id === item.skuId);
+          const sku = findSkuById(item.skuId);
           const rawSupplier = Number((sku as any)?.supplierId);
           return {
             skuId: item.skuId,
@@ -135,8 +156,8 @@ const ContainerPlanner: React.FC<Props> = ({
 
       const newDraft: PlanningDraft = {
         id: draftId,
-        title: planningTitle,
-        items: selectedSkus,
+        title: planningTitle?.trim() || "Shipment Draft",
+        items: validSelections, // use validated items
         containerType: selectedContainerName,
         updatedAt: new Date().toLocaleString(),
       };
@@ -163,35 +184,61 @@ const ContainerPlanner: React.FC<Props> = ({
     }
 
     const prName = planningTitle?.trim() || `PR ${new Date().toISOString().slice(0, 10)}`;
-    const prId = `PR-${Date.now().toString().slice(-10)}`;
+    const prId = currentDraftId || `PR-${Date.now().toString().slice(-10)}`; // reuse draft id if exists
     const util = calculateUtilization();
 
     try {
       setIsSavingPr(true);
       const containerId = await resolveContainerId();
 
-      await createPrWithLines({
-        id: prId,
-        title: prName,
-        containerId, // always persisted to PR.container_id
-        status: "SUBMITTED",
-        items: validSelections.map(item => {
-          const sku = skus.find(s => s.id === item.skuId);
-          const rawSupplier = Number((sku as any)?.supplierId);
-          return {
-            skuId: item.skuId,
-            supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
-            unitQty: item.qty,
-            status: "SUBMITTED",
-          };
-        }),
-      });
+      if (currentDraftId) {
+        // Existing draft -> persist latest lines first, then move status to PENDING
+        await saveDraftPr({
+          id: prId,
+          title: prName,
+          containerId,
+          status: "DRAFT",
+          items: validSelections.map(item => {
+            const sku = findSkuById(item.skuId);
+            const rawSupplier = Number((sku as any)?.supplierId);
+            return {
+              skuId: item.skuId,
+              supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
+              unitQty: Number(item.qty) || 0,
+              status: "DRAFT",
+            };
+          }),
+        });
+
+        await updatePr(prId, {
+          status: "PENDING",
+          updatedOn: new Date().toISOString(),
+        });
+      } else {
+        // New PR directly -> create with PENDING
+        await createPrWithLines({
+          id: prId,
+          title: prName,
+          containerId,
+          status: "PENDING",
+          items: validSelections.map(item => {
+            const sku = findSkuById(item.skuId);
+            const rawSupplier = Number((sku as any)?.supplierId);
+            return {
+              skuId: item.skuId,
+              supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
+              unitQty: Number(item.qty) || 0,
+              status: "PENDING",
+            };
+          }),
+        });
+      }
 
       const newPr: PurchaseRequisition = {
         id: prId,
         title: prName,
         items: validSelections.map(item => {
-          const sku = skus.find(s => s.id === item.skuId);
+          const sku = findSkuById(item.skuId);
           return {
             skuId: item.skuId,
             model: sku?.model || item.skuId || 'Unknown',
@@ -200,9 +247,9 @@ const ContainerPlanner: React.FC<Props> = ({
           };
         }),
         containerType: selectedContainerName,
-        utilizationCbm: (util.cbm / containerType.capacityCbm) * 100,
-        utilizationWeight: (util.kg / containerType.maxWeightKg) * 100,
-        status: 'SUBMITTED',
+        utilizationCbm: util.volPercent,
+        utilizationWeight: util.weightPercent,
+        status: 'PENDING',
         createdAt: new Date().toISOString()
       };
 
@@ -256,7 +303,7 @@ const ContainerPlanner: React.FC<Props> = ({
                 </div>
               )}
               {selectedSkus.map(item => {
-                const sku = skus.find(s => s.id === item.skuId);
+                const sku = findSkuById(item.skuId);
 
                 const modelLabel = sku?.model || item.skuId || "Unknown SKU";
 
