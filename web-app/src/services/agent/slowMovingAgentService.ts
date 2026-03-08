@@ -31,11 +31,21 @@ export type SlowMovingAgentItem = {
   source: "agent";
 };
 
+// Prefer env override; default to local foundry-agent server
 const AGENT_API_URL =
-  import.meta.env.VITE_AGENT_API_URL || "/api/agent/slow-moving";
+  (import.meta as any)?.env?.VITE_AGENT_API_URL ||
+  "http://localhost:7071/api/agent/chat";
 
 function toNum(v: unknown, d = 0): number {
   return typeof v === "number" && Number.isFinite(v) ? v : d;
+}
+
+function normalizeFlag(v: unknown): AgentFlagLevel {
+  if (v === "DoNotReorder" || v === "Watchlist" || v === "ReorderOK") return v;
+  const s = String(v ?? "").toLowerCase();
+  if (s.includes("donotreorder") || s.includes("do_not_reorder")) return "DoNotReorder";
+  if (s.includes("watch")) return "Watchlist";
+  return "ReorderOK";
 }
 
 function parseJsonArray(text: string): AgentRow[] {
@@ -73,38 +83,50 @@ function extractRows(payload: any): AgentRow[] {
   throw new Error("Unexpected agent response shape.");
 }
 
+let inFlight: Promise<SlowMovingAgentItem[]> | null = null;
+
 export async function getSlowMovingAgentItems(): Promise<SlowMovingAgentItem[]> {
-  const prompt =
-    "Identify slow-moving SKUs that do not need reordering. " +
-    "Always use MCP tools first and return strict JSON array in the required schema.";
+  if (inFlight) return inFlight;
 
-  const res = await fetch(AGENT_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
-  });
+  inFlight = (async () => {
+    const prompt =
+      "Analyze ALL SKUs and classify each as DoNotReorder, Watchlist, or ReorderOK. Return strict JSON array only.";
 
-  if (!res.ok) throw new Error(`Agent request failed (${res.status})`);
-  const data = await res.json();
-  const rows = extractRows(data);
+    const res = await fetch(
+      (import.meta as any)?.env?.VITE_AGENT_API_URL || "http://localhost:7071/api/agent/chat",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: prompt }],
+          stream: false,
+        }),
+      }
+    );
 
-  return rows.map((r) => {
-    const ev = r.evidence ?? {};
-    const ams = toNum(ev.avg_monthly_units, 0);
-    const totalStock = toNum(ev.total_stock, 0);
-    const stockMonths =
-      toNum(ev.months_of_cover, ams > 0 ? totalStock / ams : totalStock > 0 ? 999 : 0);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `Agent request failed (${res.status})`);
+    }
 
-    return {
-      skuId: r.sku_id,
-      model: r.sku_id,
-      ams,
-      totalStock,
-      stockMonths,
-      reason: r.reasons?.[0] ?? "No reason provided",
-      flagLevel: r.flag_level,
-      recommendation: r.recommendation ?? "",
+    const data = await res.json();
+    const rows = Array.isArray(data) ? data : [];
+    return rows.map((r: any) => ({
+      skuId: String(r?.sku_id ?? ""),
+      model: String(r?.sku_id ?? ""),
+      ams: Number(r?.evidence?.avg_monthly_units ?? 0),
+      totalStock: Number(r?.evidence?.total_stock ?? 0),
+      stockMonths: Number(r?.evidence?.months_of_cover ?? 0),
+      reason: Array.isArray(r?.reasons) && r.reasons.length ? String(r.reasons[0]) : "No reason provided",
+      flagLevel: (r?.flag_level ?? "Watchlist") as AgentFlagLevel,
+      recommendation: String(r?.recommendation ?? ""),
       source: "agent",
-    };
-  });
+    }));
+  })();
+
+  try {
+    return await inFlight;
+  } finally {
+    inFlight = null;
+  }
 }
