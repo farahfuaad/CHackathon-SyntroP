@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { SKU, PurchaseRequisition } from '../types';
 import { MOCK_SUPPLIERS } from '../constants';
 import { fetchPrWithLines, updatePr } from '../src/services/prService';
+import { fetchSupplierListing, type SupplierListing } from '../src/services/supplierService';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { 
   CheckCircle, 
   XCircle, 
@@ -29,6 +32,38 @@ const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams }) =
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionLabel, setActionLabel] = useState<string>('');
   const [selectedHistoryPr, setSelectedHistoryPr] = useState<PurchaseRequisition | null>(null);
+  const [supplierMap, setSupplierMap] = useState<Map<string, { name: string; email: string }>>(new Map());
+
+  const normalizeSupplierKey = (raw: string) => {
+    const v = (raw || '').trim().toUpperCase();
+    if (!v) return '';
+    if (/^S\d+$/.test(v)) return v.slice(1);
+    return v;
+  };
+
+  const getSupplierInfo = (supplierId?: string) => {
+    const rawId = String(supplierId || '').trim();
+    if (!rawId) {
+      return { name: 'N/A', email: 'N/A' };
+    }
+
+    const direct = supplierMap.get(rawId);
+    if (direct) return direct;
+
+    const normalized = normalizeSupplierKey(rawId);
+    const byNormalized = supplierMap.get(normalized);
+    if (byNormalized) return byNormalized;
+
+    const mock =
+      MOCK_SUPPLIERS.find((s) => s.id === rawId) ||
+      MOCK_SUPPLIERS.find((s) => normalizeSupplierKey(s.id) === normalized);
+
+    if (mock) {
+      return { name: mock.name, email: mock.email || 'N/A' };
+    }
+
+    return { name: `Supplier ${rawId}`, email: 'N/A' };
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -38,11 +73,23 @@ const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams }) =
         setIsLoading(true);
         setFetchError(null);
 
-        const data = await fetchPrWithLines();
+        const [data, supplierList] = await Promise.all([
+          fetchPrWithLines(),
+          fetchSupplierListing(),
+        ]);
         if (!mounted) return;
 
         const safeData = Array.isArray(data) ? (data as PurchaseRequisition[]) : [];
         setPrs(safeData);
+
+        const map = new Map<string, { name: string; email: string }>();
+        (supplierList || []).forEach((s: SupplierListing) => {
+          const key = String(s.id || '').trim();
+          if (!key) return;
+          map.set(key, { name: s.name, email: s.email || 'N/A' });
+          map.set(normalizeSupplierKey(key), { name: s.name, email: s.email || 'N/A' });
+        });
+        setSupplierMap(map);
       } catch (err) {
         console.error('Failed to fetch PR queue:', err);
         if (mounted) setFetchError('Failed to load purchase requisitions. Please refresh and try again.');
@@ -125,45 +172,112 @@ const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams }) =
     }
   };
 
-  const downloadPackingList = (pr: PurchaseRequisition, supplierId: string) => {
-    const supplier = MOCK_SUPPLIERS.find(s => s.id === supplierId);
-    const supplierItems = pr.items.filter(i => i.supplierId === supplierId);
+  const downloadPrPackingListPdf = (pr: PurchaseRequisition) => {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
 
-    if (supplierItems.length === 0) {
-      alert('No line items found for this supplier.');
-      return;
-    }
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const supplierSummary = Array.from(
+      new Set(pr.items.map((i) => i.supplierId).filter((v): v is string => !!v))
+    )
+      .map((sId) => getSupplierInfo(sId).name)
+      .join(', ');
 
-    const supplierName = supplier?.name ?? `Supplier_${supplierId}`;
-    const supplierEmail = supplier?.email ?? 'N/A';
-    
-    const content = `
-APPROVED PACKING LIST - FIAMMA GROUP
-------------------------------------
-PR ID: ${pr.id}
-Date: ${new Date().toLocaleDateString()}
-Supplier: ${supplierName} (${supplierEmail})
-Container Type: ${pr.containerType}
+    doc.setFillColor(30, 64, 175);
+    doc.roundedRect(14, 12, pageWidth - 28, 22, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text('PACKING LIST', 20, 22);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('FIAMMA GROUP | Syntro-P', 20, 28);
 
-ITEMS:
-${supplierItems.map(i => `- ${i.model} (${i.skuId}): ${i.qty} units`).join('\n')}
+    doc.setTextColor(17, 24, 39);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`PR ID: ${pr.id}`, pageWidth - 20, 22, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth - 20, 28, { align: 'right' });
 
-Utilization: Vol ${pr.utilizationCbm.toFixed(1)}%, Weight ${pr.utilizationWeight.toFixed(1)}%
-------------------------------------
-STATUS: SYSTEM APPROVED
-    `.trim();
-    
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const safeName = supplierName.replace(/[^\w.-]+/g, '_');
+    const metaRows = [
+      ['Title', pr.title || '-'],
+      ['Status', pr.status || '-'],
+      ['Container Type', pr.containerType || '-'],
+      ['Utilization', `Vol ${pr.utilizationCbm.toFixed(1)}% | Weight ${pr.utilizationWeight.toFixed(1)}%`],
+      ['Suppliers', supplierSummary || 'N/A'],
+    ] as const;
 
-    a.href = url;
-    a.download = `${pr.id}_PackingList_${safeName}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    autoTable(doc, {
+      startY: 40,
+      body: metaRows.map(([k, v]) => [k, v]),
+      theme: 'grid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 9,
+        textColor: [31, 41, 55],
+        cellPadding: 2.4,
+        lineColor: [226, 232, 240],
+      },
+      columnStyles: {
+        0: { cellWidth: 38, fontStyle: 'bold', fillColor: [248, 250, 252] },
+        1: { cellWidth: pageWidth - 28 - 38 },
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    const itemRows = pr.items.map((item, idx) => {
+      const supplierName = item.supplierId
+        ? getSupplierInfo(item.supplierId).name
+        : 'N/A';
+      return [
+        String(idx + 1),
+        item.model || '-',
+        item.skuId || '-',
+        String(item.qty ?? 0),
+        supplierName,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 6 : 86,
+      head: [['#', 'Model', 'SKU', 'Qty', 'Supplier']],
+      body: itemRows.length ? itemRows : [['-', 'No items', '-', '0', '-']],
+      theme: 'striped',
+      headStyles: {
+        fillColor: [30, 64, 175],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+      },
+      styles: {
+        font: 'helvetica',
+        fontSize: 9,
+        cellPadding: 2.4,
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      margin: { left: 14, right: 14 },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 56 },
+        2: { cellWidth: 34 },
+        3: { cellWidth: 16, halign: 'right' },
+        4: { cellWidth: pageWidth - 28 - 10 - 56 - 34 - 16 },
+      },
+      didDrawPage: (data) => {
+        const footerY = doc.internal.pageSize.getHeight() - 8;
+        doc.setFontSize(8);
+        doc.setTextColor(100, 116, 139);
+        doc.text('Generated by Syntro-P Queue and Approvals', 14, footerY);
+        doc.text(`Page ${data.pageNumber}`, pageWidth - 14, footerY, { align: 'right' });
+      },
+    });
+
+    doc.save(`${pr.id}_PackingList.pdf`);
   };
 
   return (
@@ -427,40 +541,6 @@ STATUS: SYSTEM APPROVED
                 </div>
               </div>
 
-              {selectedHistoryPr.status === 'APPROVED' && (
-                <div className="space-y-4">
-                  <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Supplier Documents</h5>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {Array.from(
-                      new Set(
-                        selectedHistoryPr.items
-                          .map(i => i.supplierId)
-                          .filter((v): v is string => !!v)
-                      )
-                    ).map((sId) => {
-                      const supplier = MOCK_SUPPLIERS.find(s => s.id === sId);
-                      return (
-                        <button 
-                          type="button"
-                          key={sId}
-                          onClick={() => downloadPackingList(selectedHistoryPr, sId)}
-                          className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl hover:border-blue-400 group transition-all"
-                        >
-                          <div className="flex items-center gap-3">
-                            <FileText size={18} className="text-slate-400 group-hover:text-blue-500" />
-                            <div className="text-left">
-                              <p className="text-[10px] font-bold text-slate-900">{supplier?.name ?? `Supplier ${sId}`}</p>
-                              <p className="text-[9px] text-slate-500 uppercase tracking-tight">Packing List</p>
-                            </div>
-                          </div>
-                          <Download size={14} className="text-slate-300 group-hover:text-blue-500" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {selectedHistoryPr.status === 'REJECTED' && (
                 <div className="bg-red-50 p-4 rounded-2xl border border-red-100 flex items-start gap-3">
                   <AlertCircle size={18} className="text-red-600 mt-0.5" />
@@ -470,6 +550,14 @@ STATUS: SYSTEM APPROVED
             </div>
 
             <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => downloadPrPackingListPdf(selectedHistoryPr)}
+                className="mr-3 bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-blue-700 transition-all active:scale-95 flex items-center gap-2"
+              >
+                <Download size={16} />
+                Download Packing List
+              </button>
               <button 
                 type="button"
                 onClick={() => setSelectedHistoryPr(null)}

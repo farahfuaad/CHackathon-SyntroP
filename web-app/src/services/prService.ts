@@ -1,5 +1,7 @@
 import { apiDelete, apiGetListAll, apiPatch, apiPost } from "./apiClient";
 import { PurchaseRequisition } from '../../types';
+import { fetchContainerReference } from "./containerService";
+import { fetchProductSpecListing } from "./productDetailService";
 
 const ENTITY_PR = "PR";
 const ENTITY_PR_LINE = "PRLine";
@@ -24,6 +26,11 @@ type PrLineRow = {
   supplier_id?: number | null;
   unit_qty?: number | null;
   line_status?: string | null;
+};
+
+type UtilizationTotals = {
+  cbm: number;
+  kg: number;
 };
 
 export type PrUiLineItem = {
@@ -227,10 +234,44 @@ export async function deletePr(prId: string): Promise<void> {
 }
 
 export async function fetchPrWithLines(): Promise<PurchaseRequisition[]> {
-  const [headers, lines] = await Promise.all([
+  const [headers, lines, containerRefs, productSpecs] = await Promise.all([
     apiGetListAll<PrHeaderRow>(ENTITY_PR),
     apiGetListAll<PrLineRow>(ENTITY_PR_LINE),
+    fetchContainerReference(),
+    fetchProductSpecListing(),
   ]);
+
+  const containerById = new Map<number, { name: string; capacityCbm: number; maxWeightKg: number }>();
+  containerRefs.forEach((c) => {
+    const id = Number(c.id);
+    if (!Number.isFinite(id)) return;
+    containerById.set(id, {
+      name: c.name,
+      capacityCbm: Number(c.capacityCbm) || 0,
+      maxWeightKg: Number(c.maxWeightKg) || 0,
+    });
+  });
+
+  const specBySkuKey = new Map<string, {
+    modelName: string;
+    supplierId: string;
+    lengthCm: number;
+    widthCm: number;
+    heightCm: number;
+    weightKg: number;
+  }>();
+  productSpecs.forEach((s) => {
+    const key = (s.skuId || "").trim().toUpperCase();
+    if (!key) return;
+    specBySkuKey.set(key, {
+      modelName: s.modelName || s.skuId,
+      supplierId: String(s.supplierId || '').trim(),
+      lengthCm: Number(s.lengthCm) || 0,
+      widthCm: Number(s.widthCm) || 0,
+      heightCm: Number(s.heightCm) || 0,
+      weightKg: Number(s.weightKg) || 0,
+    });
+  });
 
   const byPrId = new Map<string, PrLineRow[]>();
   for (const line of lines) {
@@ -245,21 +286,50 @@ export async function fetchPrWithLines(): Promise<PurchaseRequisition[]> {
     .map((header) => {
       const id = (header.pr_id || "").trim();
       const lineItems = byPrId.get(id) || [];
+      const containerId = Number(header.container_id);
+      const container = Number.isFinite(containerId) ? containerById.get(containerId) : undefined;
+
+      const totals = lineItems.reduce<UtilizationTotals>((acc, line) => {
+        const skuKey = (line.sku_id || "").trim().toUpperCase();
+        const qty = Number(line.unit_qty) || 0;
+        if (!skuKey || qty <= 0) return acc;
+
+        const spec = specBySkuKey.get(skuKey);
+        if (!spec) return acc;
+
+        const itemCbm = (spec.lengthCm * spec.widthCm * spec.heightCm) / 1000000;
+        acc.cbm += itemCbm * qty;
+        acc.kg += spec.weightKg * qty;
+        return acc;
+      }, { cbm: 0, kg: 0 });
+
+      const capacityCbm = Number(container?.capacityCbm) || 0;
+      const maxWeightKg = Number(container?.maxWeightKg) || 0;
+
+      const utilizationCbm = capacityCbm > 0 ? (totals.cbm / capacityCbm) * 100 : 0;
+      const utilizationWeight = maxWeightKg > 0 ? (totals.kg / maxWeightKg) * 100 : 0;
+
       return {
         id,
         title: (header.pr_title || id || "Untitled PR").trim(),
-        containerType: header.container_id != null ? `Container #${header.container_id}` : "N/A",
-        utilizationCbm: 0,
-        utilizationWeight: 0,
+        containerType: container?.name || (header.container_id != null ? `Container #${header.container_id}` : "N/A"),
+        utilizationCbm,
+        utilizationWeight,
         status: normalizeStatus(header.status),
         createdAt: header.createdOn || new Date().toISOString(),
         emailSentAt: undefined,
         updatedOn: header.updatedOn || undefined,
         items: lineItems.map((line) => ({
           skuId: (line.sku_id || "").trim(),
-          model: (line.sku_id || "Unknown").trim() || "Unknown",
+          model:
+            specBySkuKey.get((line.sku_id || "").trim().toUpperCase())?.modelName ||
+            (line.sku_id || "Unknown").trim() ||
+            "Unknown",
           qty: Number(line.unit_qty) || 0,
-          supplierId: line.supplier_id != null ? String(line.supplier_id) : undefined,
+          supplierId:
+            line.supplier_id != null
+              ? String(line.supplier_id)
+              : specBySkuKey.get((line.sku_id || "").trim().toUpperCase())?.supplierId || undefined,
         })),
       } as PurchaseRequisition;
     })

@@ -413,6 +413,7 @@ export type ProductSpecListing = {
   skuId: string;
   modelName: string;
   categoryLabel: string;
+  supplierId: string;
   lengthCm: number;
   widthCm: number;
   heightCm: number;
@@ -427,6 +428,7 @@ export async function fetchProductSpecListing(): Promise<ProductSpecListing[]> {
       skuId: (r.sku_id || "").trim(),
       modelName: r.sku_model_name || "",
       categoryLabel: CATEGORY_ID_TO_LABEL[r.category] || "Uncategorized",
+      supplierId: r.supplier_id != null ? String(r.supplier_id) : "",
       lengthCm: toNum(r.box_length_cm),
       widthCm: toNum(r.box_width_cm),
       heightCm: toNum(r.box_height_cm),

@@ -1,6 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPrWithLines, saveDraftPr, updatePr } from "../src/services/prService";
 import { fetchContainerReference } from "../src/services/containerService";
+import {
+  fetchProductSpecListing,
+  type ProductSpecListing,
+} from "../src/services/productDetailService";
 import { SKU, ContainerType, PurchaseRequisition, PlanningDraft } from "../types";
 import {
   Box,
@@ -40,6 +44,23 @@ type BannerState =
   | { type: "error"; message: string }
   | null;
 
+type SkuSpecForCalc = {
+  skuId: string;
+  model: string;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+  weightKg: number;
+  supplierId?: string;
+};
+
+type UtilizationStats = {
+  cbm: number;
+  kg: number;
+  volPercent: number;
+  weightPercent: number;
+};
+
 const ContainerPlanner: React.FC<Props> = ({
   skus,
   containerTypes,
@@ -59,6 +80,33 @@ const ContainerPlanner: React.FC<Props> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingPr, setIsSavingPr] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
+  const [dbProductSpecs, setDbProductSpecs] = useState<Map<string, ProductSpecListing>>(new Map());
+
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        const rows = await fetchProductSpecListing();
+        if (!mounted) return;
+
+        const bySku = new Map<string, ProductSpecListing>();
+        rows.forEach((row) => {
+          const key = (row.skuId || "").trim().toUpperCase();
+          if (!key) return;
+          bySku.set(key, row);
+        });
+
+        setDbProductSpecs(bySku);
+      } catch (err) {
+        console.error("Failed to load Product specs for utilization:", err);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleLoadDraftLocal = (draft: PlanningDraft) => {
     onLoadDraft(draft);
@@ -89,6 +137,38 @@ const ContainerPlanner: React.FC<Props> = ({
     return skus.find((s) => (s.id || "").trim().toUpperCase() === key);
   };
 
+  const getSkuSpecForCalc = (skuId: string): SkuSpecForCalc | null => {
+    const key = (skuId || "").trim().toUpperCase();
+    if (!key) return null;
+
+    const dbSpec = dbProductSpecs.get(key);
+    const localSku = findSkuById(skuId);
+
+    if (dbSpec) {
+      return {
+        skuId: dbSpec.skuId,
+        model: dbSpec.modelName || localSku?.model || dbSpec.skuId,
+        lengthCm: Number(dbSpec.lengthCm) || 0,
+        widthCm: Number(dbSpec.widthCm) || 0,
+        heightCm: Number(dbSpec.heightCm) || 0,
+        weightKg: Number(dbSpec.weightKg) || 0,
+        supplierId: dbSpec.supplierId || localSku?.supplierId,
+      };
+    }
+
+    if (!localSku) return null;
+
+    return {
+      skuId: localSku.id,
+      model: localSku.model || localSku.id,
+      lengthCm: Number(localSku.dimensions?.l || 0),
+      widthCm: Number(localSku.dimensions?.w || 0),
+      heightCm: Number(localSku.dimensions?.h || 0),
+      weightKg: Number(localSku.weight || 0),
+      supplierId: localSku.supplierId,
+    };
+  };
+
   const updateQty = (skuId: string, qty: number) => {
     const safeQty = Number.isFinite(qty) ? Math.max(0, qty) : 0;
     const key = (skuId || "").trim().toUpperCase();
@@ -109,17 +189,17 @@ const ContainerPlanner: React.FC<Props> = ({
     );
   };
 
-  const calculateUtilization = () => {
+  const calculateUtilizationForContainer = (container: ContainerType): UtilizationStats => {
     let totalCbm = 0;
     let totalKg = 0;
 
     selectedSkus.forEach((item) => {
-      const sku = findSkuById(item.skuId);
+      const sku = getSkuSpecForCalc(item.skuId);
       if (sku) {
-        const l = Number(sku.dimensions?.l || 0);
-        const w = Number(sku.dimensions?.w || 0);
-        const h = Number(sku.dimensions?.h || 0);
-        const weight = Number(sku.weight || 0);
+        const l = Number(sku.lengthCm || 0);
+        const w = Number(sku.widthCm || 0);
+        const h = Number(sku.heightCm || 0);
+        const weight = Number(sku.weightKg || 0);
 
         const itemCbm = (l * w * h) / 1000000;
         totalCbm += itemCbm * Number(item.qty || 0);
@@ -127,8 +207,8 @@ const ContainerPlanner: React.FC<Props> = ({
       }
     });
 
-    const capacityCbm = Number(containerType?.capacityCbm) || 0;
-    const maxWeightKg = Number(containerType?.maxWeightKg) || 0;
+    const capacityCbm = Number(container?.capacityCbm) || 0;
+    const maxWeightKg = Number(container?.maxWeightKg) || 0;
 
     return {
       cbm: totalCbm,
@@ -138,7 +218,12 @@ const ContainerPlanner: React.FC<Props> = ({
     };
   };
 
-  const stats = useMemo(() => calculateUtilization(), [selectedSkus, containerType, skus]);
+  const calculateUtilization = () => calculateUtilizationForContainer(containerType);
+
+  const stats = useMemo(
+    () => calculateUtilization(),
+    [selectedSkus, containerType, skus, dbProductSpecs]
+  );
 
   function normalizeContainerKey(v: string): string {
     return (v || "")
@@ -176,23 +261,22 @@ const ContainerPlanner: React.FC<Props> = ({
     const errors: string[] = [];
 
     items.forEach((item) => {
-      const sku = findSkuById(item.skuId);
+      const sku = getSkuSpecForCalc(item.skuId);
 
-      // SKU may come from DB and not exist in the local skus prop — that's OK.
-      // Only validate dimensions/weight when the SKU is found locally.
+      // If SKU is absent from both DB specs and local list, skip strict validation.
       if (!sku) return;
 
-      const l = Number(sku.dimensions?.l || 0);
-      const w = Number(sku.dimensions?.w || 0);
-      const h = Number(sku.dimensions?.h || 0);
-      const weight = Number(sku.weight || 0);
+      const l = Number(sku.lengthCm || 0);
+      const w = Number(sku.widthCm || 0);
+      const h = Number(sku.heightCm || 0);
+      const weight = Number(sku.weightKg || 0);
 
       if (l <= 0 || w <= 0 || h <= 0) {
-        errors.push(`SKU "${sku.model || sku.id}" has missing or invalid dimensions.`);
+        errors.push(`SKU "${sku.model || sku.skuId}" has missing or invalid dimensions.`);
       }
 
       if (weight <= 0) {
-        errors.push(`SKU "${sku.model || sku.id}" has missing or invalid weight.`);
+        errors.push(`SKU "${sku.model || sku.skuId}" has missing or invalid weight.`);
       }
     });
 
@@ -233,8 +317,8 @@ const ContainerPlanner: React.FC<Props> = ({
         containerId,
         status: "DRAFT",
         items: validSelections.map((item) => {
-          const sku = findSkuById(item.skuId);
-          const rawSupplier = Number((sku as any)?.supplierId);
+          const sku = getSkuSpecForCalc(item.skuId);
+          const rawSupplier = Number(sku?.supplierId);
           return {
             skuId: item.skuId,
             supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
@@ -315,8 +399,8 @@ const ContainerPlanner: React.FC<Props> = ({
           containerId,
           status: "DRAFT",
           items: validSelections.map((item) => {
-            const sku = findSkuById(item.skuId);
-            const rawSupplier = Number((sku as any)?.supplierId);
+            const sku = getSkuSpecForCalc(item.skuId);
+            const rawSupplier = Number(sku?.supplierId);
             return {
               skuId: item.skuId,
               supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
@@ -337,8 +421,8 @@ const ContainerPlanner: React.FC<Props> = ({
           containerId,
           status: "PENDING",
           items: validSelections.map((item) => {
-            const sku = findSkuById(item.skuId);
-            const rawSupplier = Number((sku as any)?.supplierId);
+            const sku = getSkuSpecForCalc(item.skuId);
+            const rawSupplier = Number(sku?.supplierId);
             return {
               skuId: item.skuId,
               supplierId: Number.isFinite(rawSupplier) ? rawSupplier : undefined,
@@ -353,7 +437,7 @@ const ContainerPlanner: React.FC<Props> = ({
         id: prId,
         title: prName,
         items: validSelections.map((item) => {
-          const sku = findSkuById(item.skuId);
+          const sku = getSkuSpecForCalc(item.skuId);
           return {
             skuId: item.skuId,
             model: sku?.model || item.skuId || "Unknown",
@@ -470,7 +554,7 @@ const ContainerPlanner: React.FC<Props> = ({
               )}
 
               {selectedSkus.map((item) => {
-                const sku = findSkuById(item.skuId);
+                const sku = getSkuSpecForCalc(item.skuId);
                 const modelLabel = sku?.model || item.skuId || "Unknown SKU";
 
                 return (
@@ -486,7 +570,7 @@ const ContainerPlanner: React.FC<Props> = ({
                       <h4 className="text-sm font-bold text-slate-800">{modelLabel}</h4>
                       <p className="text-[10px] text-slate-500 uppercase tracking-tighter">
                         {sku
-                          ? `Dim: ${sku.dimensions.l}x${sku.dimensions.w}x${sku.dimensions.h}cm • ${sku.weight}kg`
+                          ? `Dim: ${sku.lengthCm}x${sku.widthCm}x${sku.heightCm}cm • ${sku.weightKg}kg`
                           : `SKU: ${item.skuId} • Specs unavailable`}
                       </p>
                     </div>
