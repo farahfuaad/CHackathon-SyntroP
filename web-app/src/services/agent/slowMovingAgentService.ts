@@ -92,17 +92,22 @@ export async function getSlowMovingAgentItems(): Promise<SlowMovingAgentItem[]> 
     const prompt =
       "Analyze ALL SKUs and classify each as DoNotReorder, Watchlist, or ReorderOK. Return strict JSON array only.";
 
-    const res = await fetch(
-      (import.meta as any)?.env?.VITE_AGENT_API_URL || "http://localhost:7071/api/agent/chat",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: prompt }],
-          stream: false,
-        }),
-      }
-    );
+    const url = `${AGENT_API_URL}?t=${Date.now()}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+        forceFresh: true
+      }),
+    });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

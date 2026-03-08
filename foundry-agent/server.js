@@ -26,7 +26,13 @@ const corsOptions = {
     return cb(new Error(`Origin ${origin} is not allowed by Access-Control-Allow-Origin`));
   },
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Cache-Control",
+    "Pragma",
+    "X-Requested-With",
+  ],
   credentials: false,
 };
 
@@ -47,7 +53,13 @@ const DEFAULT_PROMPT =
 const RETRY_PROMPT =
   "Analyze ALL SKUs from sales, InventoryStocks, and warehouse. Return one JSON object per SKU with flag_level DoNotReorder | Watchlist | ReorderOK. Return strict JSON array only. Do not return [] unless all source entities have zero rows.";
 const FALLBACK_SCOPED_PROMPT =
-  "Context is constrained. Use MCP with narrow reads only: first identify candidate slow-moving SKUs from sales (ams_3m <= 20 OR ams_6m <= 20 OR latest month units <= 10). Then fetch InventoryStocks and warehouse only for those candidate sku_ids. Return strict JSON array only with flag_level DoNotReorder|Watchlist|ReorderOK. If no candidates, return [].";
+  "Context is constrained. Use MCP with narrow reads only: first identify candidate slow-moving SKUs from sales (ams_3m <= 2 OR ams_6m <= 2 OR latest month units <= 10). Then fetch InventoryStocks and warehouse only for those candidate sku_ids. Return strict JSON array only with flag_level DoNotReorder|Watchlist|ReorderOK. If no candidates, return [].";
+
+const THROTTLE_CODES = new Set([
+  "too_many_requests",
+  "rate_limit_exceeded",
+  "agent_throttled",
+]);
 
 function extractAssistantText(payload) {
   const out = Array.isArray(payload?.output) ? payload.output : [];
@@ -78,7 +90,7 @@ function tryParseJsonText(text) {
   }
 }
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 60_000; // keep last good response for 60s
 let lastResult = null;
 let lastResultAt = 0;
 
@@ -116,42 +128,52 @@ async function callResponsesApiWithRetry(token, input, maxRetries = 4) {
   }
 }
 
+function buildFreshInput(messages) {
+  // Always start a fresh chat with ONE user turn only
+  const lastUser = Array.isArray(messages)
+    ? [...messages].reverse().find((m) => m?.role === "user" && typeof m?.content === "string")
+    : null;
+
+  const text = (lastUser?.content || DEFAULT_PROMPT).slice(0, 4000); // hard cap prompt size
+  return [{ role: "user", content: [{ type: "input_text", text }] }];
+}
+
 app.post("/api/agent/chat", async (req, res) => {
   try {
-    const now = Date.now();
-    if (lastResult && now - lastResultAt < CACHE_TTL_MS) {
-      return res.status(200).json(lastResult);
-    }
-
     const { messages = [], stream = false } = req.body || {};
     if (stream) return res.status(400).json({ error: "stream=true not supported" });
 
     const token = await getToken();
+    const firstInput = buildFreshInput(messages);
+    let { upstream, payload } = await callResponsesApiWithRetry(token, firstInput);
 
-    const input =
-      Array.isArray(messages) && messages.length
-        ? messages.map((m) => ({
-            role: m.role,
-            content: [{ type: "input_text", text: m.content || "" }],
-          }))
-        : [{ role: "user", content: [{ type: "input_text", text: DEFAULT_PROMPT }] }];
-
-    const { upstream, payload } = await callResponsesApiWithRetry(token, input);
+    if (!upstream.ok && payload?.error?.code === "context_length_exceeded") {
+      const scopedInput = [
+        { role: "user", content: [{ type: "input_text", text: FALLBACK_SCOPED_PROMPT }] },
+      ];
+      ({ upstream, payload } = await callResponsesApiWithRetry(token, scopedInput, 2));
+    }
 
     if (!upstream.ok) {
-      if (upstream.status === 429) {
-        return res.status(503).json({ error: { message: "Agent busy. Please retry in 10-30s.", code: "agent_throttled" } });
+      const code = payload?.error?.code;
+      if (upstream.status === 429 || THROTTLE_CODES.has(code)) {
+        // serve stale last-good if available
+        if (lastResult && Date.now() - lastResultAt < CACHE_TTL_MS) {
+          return res.status(200).json(lastResult);
+        }
+        return res.status(503).json({
+          error: { message: "Agent busy. Please retry in 10-30s.", code: "agent_throttled" },
+        });
       }
       return res.status(upstream.status).json(payload);
     }
 
     const assistantText = extractAssistantText(payload);
     const parsed = tryParseJsonText(assistantText);
-
     const result = parsed ?? { message: assistantText || "No assistant output_text found" };
+
     lastResult = result;
     lastResultAt = Date.now();
-
     return res.status(200).json(result);
   } catch (err) {
     return res.status(500).json({ error: err?.message || "Unknown error" });
