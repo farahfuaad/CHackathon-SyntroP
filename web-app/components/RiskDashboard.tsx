@@ -1,5 +1,4 @@
-
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { InventorySkuListing } from '../src/services/productDetailService';
 import type { SupplierListing } from '../src/services/supplierService';
 import type { ComplaintAggBySku } from '../src/services/complaintService';
@@ -18,6 +17,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { BarChart as ReBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { getSlowMovingAgentItems } from '../src/services/agent/slowMovingAgentService';
 
 interface Props {
   inventory: InventorySkuListing[];
@@ -31,6 +31,7 @@ interface Props {
 const DASHBOARD_TOP_N = 5;
 const LEAD_TIME_THRESHOLD_DAYS = 30;
 const RELIABILITY_THRESHOLD = 0.9;
+const SLOW_MOVING_THRESHOLD_MONTHS = 3;
 
 type SlowMovingItem = {
   skuId: string;
@@ -39,14 +40,68 @@ type SlowMovingItem = {
   totalStock: number;
   stockMonths: number;
   reason: string;
+  flagLevel?: "DoNotReorder" | "Watchlist" | "ReorderOK";
+  recommendation?: string;
+  source?: "agent" | "rule";
 };
 
-const SLOW_MOVING_THRESHOLD_MONTHS = 6;
+type SupplierRiskRow = {
+  skuId: string;
+  model: string;
+  category: string;
+  leadTimeDays: number;
+  reliability: number;
+};
 
 const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppliers, loading, onNavigate }) => {
   const [selectedItem, setSelectedItem] = useState<SlowMovingItem | null>(null);
+  const [agentSlowMovingItems, setAgentSlowMovingItems] = useState<SlowMovingItem[]>([]);
+  const [agentLoading, setAgentLoading] = useState(true);
 
-  // ── Derived data ──────────────────────────────────────────────────
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        setAgentLoading(true);
+        const rows = await getSlowMovingAgentItems();
+        if (!active) return;
+        // show only action-needed flags in this card
+        setAgentSlowMovingItems(rows.filter((r) => r.flagLevel !== "ReorderOK"));
+      } catch {
+        if (active) setAgentSlowMovingItems([]);
+      } finally {
+        if (active) setAgentLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Slow moving fallback (current rule-based logic)
+  const fallbackSlowMovingItems = useMemo(() => {
+    const items: SlowMovingItem[] = [];
+    inventory.forEach((row) => {
+      const ams = amsMap.get(row.skuId) ?? 0;
+      const stockMonths = ams > 0 ? row.totalStock / ams : (row.totalStock > 0 ? Infinity : 0);
+
+      if (stockMonths > SLOW_MOVING_THRESHOLD_MONTHS) {
+        items.push({
+          skuId: row.skuId,
+          model: row.modelName || row.skuId,
+          ams,
+          totalStock: row.totalStock,
+          stockMonths: Number.isFinite(stockMonths) ? stockMonths : 999,
+          reason: ams === 0 ? 'Zero sales (3m)' : `${stockMonths.toFixed(1)} months of stock`,
+          source: "rule",
+        });
+      }
+    });
+    return items.sort((a, b) => b.stockMonths - a.stockMonths);
+  }, [inventory, amsMap]);
+
+  const slowMovingItems = agentSlowMovingItems.length > 0 ? agentSlowMovingItems : fallbackSlowMovingItems;
+  const slowMovingTop5 = slowMovingItems.slice(0, DASHBOARD_TOP_N);
 
   // Quality chart: failure rate relative to AMS, per SKU with complaints
   const chartData = useMemo(() => {
@@ -64,63 +119,34 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
     return items.sort((a, b) => b.failureRate - a.failureRate).slice(0, DASHBOARD_TOP_N);
   }, [inventory, amsMap, complaintMap]);
 
-  // Slow moving: stock months > threshold or zero AMS with stock on hand
-  const slowMovingItems = useMemo(() => {
-    const items: SlowMovingItem[] = [];
-    inventory.forEach((row) => {
-      const ams = amsMap.get(row.skuId) ?? 0;
-      const stockMonths = ams > 0 ? row.totalStock / ams : (row.totalStock > 0 ? Infinity : 0);
+  const leadTimeRows = useMemo<SupplierRiskRow[]>(() => {
+    return suppliers
+      .map((s, index): SupplierRiskRow => {
+        const leadTimeDays = Number((s as any).leadTimeDays ?? 0);
+        const reliability = Number((s as any).reliability ?? 1);
 
-      if (stockMonths > SLOW_MOVING_THRESHOLD_MONTHS) {
-        items.push({
-          skuId: row.skuId,
-          model: row.modelName || row.skuId,
-          ams,
-          totalStock: row.totalStock,
-          stockMonths: Number.isFinite(stockMonths) ? stockMonths : 999,
-          reason: ams === 0 ? 'Zero sales (3m)' : `${stockMonths.toFixed(1)} months of stock`,
-        });
-      }
-    });
-    return items.sort((a, b) => b.stockMonths - a.stockMonths);
-  }, [inventory, amsMap]);
+        const rawSkuId = String((s as any).skuId ?? (s as any).supplierId ?? "").trim();
+        const skuId = rawSkuId && rawSkuId !== "N/A" ? rawSkuId : `SUP-${index + 1}`;
 
-  const slowMovingTop5 = slowMovingItems.slice(0, DASHBOARD_TOP_N);
-
-  // Supplier lead time: link inventory SKUs to their supplier
-  const supplierMap = useMemo(() => {
-    const map = new Map<string, SupplierListing>();
-    suppliers.forEach((s) => map.set(s.id, s));
-    return map;
-  }, [suppliers]);
-
-  const leadTimeRows = useMemo(() => {
-    return inventory
-      .filter((row) => row.supplierId)
-      .map((row) => {
-        const sup = supplierMap.get(row.supplierId);
-        const complaints = complaintMap.get(row.skuId);
-        const ams = amsMap.get(row.skuId) ?? 0;
-        // Reliability proxy: lower if many complaints relative to sales
-        let reliability = 1;
-        if (complaints && ams > 0) {
-          reliability = Math.max(0, 1 - complaints.totalFailures / (ams * 3));
-        } else if (complaints && complaints.totalFailures > 0) {
-          reliability = Math.max(0, 1 - complaints.totalFailures / 100);
-        }
         return {
-          skuId: row.skuId,
-          model: row.modelName || row.skuId,
-          category: row.categoryLabel,
-          leadTimeDays: sup?.leadTimeDays ?? 0,
-          supplierName: sup?.name ?? 'Unknown',
-          reliability,
+          skuId,
+          model: String((s as any).modelName ?? (s as any).supplierName ?? "Unknown"),
+          category: String((s as any).category ?? "General"),
+          leadTimeDays: Number.isFinite(leadTimeDays) ? leadTimeDays : 0,
+          reliability: Number.isFinite(reliability) ? reliability : 1,
         };
       })
-      .filter((row) => row.reliability < RELIABILITY_THRESHOLD || row.leadTimeDays > LEAD_TIME_THRESHOLD_DAYS)
-      .sort((a, b) => b.leadTimeDays - a.leadTimeDays)
+      .filter(
+        (row) =>
+          row.leadTimeDays > LEAD_TIME_THRESHOLD_DAYS ||
+          row.reliability < RELIABILITY_THRESHOLD
+      )
+      .sort((a, b) => {
+        if (a.reliability !== b.reliability) return a.reliability - b.reliability;
+        return b.leadTimeDays - a.leadTimeDays;
+      })
       .slice(0, DASHBOARD_TOP_N);
-  }, [inventory, supplierMap, complaintMap, amsMap]);
+  }, [suppliers]);
 
   if (loading) {
     return (
@@ -145,7 +171,7 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
             <p className="text-sm text-slate-400 py-12 text-center">No complaint data available.</p>
           ) : (
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                 <ReBarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="name" fontSize={10} tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -179,12 +205,14 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
             )}
           </div>
           <div className="space-y-3">
-            {slowMovingTop5.length === 0 ? (
+            {agentLoading ? (
+              <p className="text-sm text-slate-400 py-4 text-center">Running AI slow-moving analysis…</p>
+            ) : slowMovingTop5.length === 0 ? (
               <p className="text-sm text-slate-400 py-4 text-center">No slow-moving SKUs detected.</p>
             ) : (
-              slowMovingTop5.map((item) => (
+              slowMovingTop5.map((item, idx) => (
                 <button 
-                  key={item.skuId} 
+                  key={`${item.skuId}-${idx}`}
                   onClick={() => setSelectedItem(item)}
                   className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-blue-300 hover:bg-white hover:shadow-md transition-all group"
                 >
@@ -194,7 +222,9 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right hidden sm:block">
-                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">STAGNANT</span>
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
+                        {item.flagLevel === "Watchlist" ? "WATCHLIST" : "STAGNANT"}
+                      </span>
                     </div>
                     <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all" />
                   </div>
@@ -238,8 +268,8 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
               {leadTimeRows.length === 0 && (
                 <tr><td colSpan={4} className="px-8 py-8 text-sm text-slate-400 text-center">No supplier risk alerts.</td></tr>
               )}
-              {leadTimeRows.map((row) => (
-                <tr key={row.skuId} className="hover:bg-slate-50/50 transition-colors">
+              {leadTimeRows.map((row, idx) => (
+                <tr key={`${row.skuId}-${idx}`} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
@@ -328,24 +358,12 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
                   <h4 className="font-bold text-blue-900 text-sm">Action Requirement Analysis</h4>
                 </div>
                 <p className="text-sm text-blue-800 leading-relaxed font-medium">
-                  This SKU has effectively <strong>{Number.isFinite(selectedItem.stockMonths) ? selectedItem.stockMonths.toFixed(0) : '∞'} months</strong> of stock in hand. 
-                  Immediate liquidation is required to free up warehouse slotting.
+                  {selectedItem.recommendation
+                    ? selectedItem.recommendation
+                    : `This SKU has effectively ${Number.isFinite(selectedItem.stockMonths) ? selectedItem.stockMonths.toFixed(0) : '∞'} months of stock in hand. Immediate liquidation is required to free up warehouse slotting.`}
                 </p>
               </section>
-            </div>
-
-            {/* Commit to Action */}
-            <div className="p-8 bg-slate-50 border-t border-slate-200 flex gap-4">
-              <button 
-                className="flex-1 bg-slate-900 text-white font-bold py-4 rounded-2xl shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 flex items-center justify-center gap-2"
-                onClick={() => {
-                   setSelectedItem(null);
-                }}
-              >
-                <ArrowRightCircle size={20} />
-                Initiate Movement Plan
-              </button>
-            </div>
+            </div>          
           </div>
         </div>
       )}

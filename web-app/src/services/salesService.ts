@@ -259,6 +259,11 @@ import { apiGetListAll, apiPostBatched } from "./apiClient";
 type BulkChunkResult = { inserted?: number; updated?: number; failed?: number; errors?: string[] };
 const SALES_BULK_ENTITY = import.meta.env.VITE_SALES_BULK_ENTITY || "sales_bulk_upsert";
 
+export type AmsBySku = {
+  ams3m: number;
+  ams6m: number;
+};
+
 function normalizeSkuKey(v: string) {
   return (v || "").trim().toUpperCase();
 }
@@ -268,23 +273,22 @@ function monthToTime(v: string): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-// Module-level promise cache — shared across concurrent calls, 5-minute TTL.
-let _amsPromise: Promise<Map<string, number>> | null = null;
-let _amsPromiseTs = 0;
-const AMS_TTL_MS = 5 * 60 * 1000;
+// Single AMS cache block (keep only this one)
+let _amsBothPromise: Promise<Map<string, AmsBySku>> | null = null;
+let _amsBothPromiseTs = 0;
+const AMS_CACHE_TTL_MS = 5 * 60 * 1000;
 
-/** Invalidate after a successful sales CSV upload so users see fresh AMS. */
 export function invalidateAmsCache(): void {
-  _amsPromise = null;
+  _amsBothPromise = null;
 }
 
-export function fetchAms3mBySku(): Promise<Map<string, number>> {
-  if (_amsPromise && Date.now() - _amsPromiseTs < AMS_TTL_MS) {
-    return _amsPromise;
+export function fetchAmsBySku(): Promise<Map<string, AmsBySku>> {
+  if (_amsBothPromise && Date.now() - _amsBothPromiseTs < AMS_CACHE_TTL_MS) {
+    return _amsBothPromise;
   }
 
-  _amsPromiseTs = Date.now();
-  _amsPromise = (async (): Promise<Map<string, number>> => {
+  _amsBothPromiseTs = Date.now();
+  _amsBothPromise = (async (): Promise<Map<string, AmsBySku>> => {
     const rows = await apiGetListAll<SalesRow>("Sales");
 
     const bySku = new Map<string, SalesRow[]>();
@@ -295,25 +299,36 @@ export function fetchAms3mBySku(): Promise<Map<string, number>> {
       bySku.get(skuKey)!.push(row);
     });
 
-    const amsBySku = new Map<string, number>();
-    bySku.forEach((salesRows, skuKey) => {
-      const latestThree = salesRows
-        .slice()
-        .sort((a, b) => monthToTime(b.month) - monthToTime(a.month))
-        .slice(0, 3);
+    const out = new Map<string, AmsBySku>();
 
-      if (!latestThree.length) {
-        amsBySku.set(skuKey, 0);
-        return;
-      }
-      const totalUnits = latestThree.reduce((sum, r) => sum + (Number(r.units_sold) || 0), 0);
-      amsBySku.set(skuKey, totalUnits / latestThree.length);
+    bySku.forEach((salesRows, skuKey) => {
+      const sorted = salesRows
+        .slice()
+        .sort((a, b) => monthToTime(b.month) - monthToTime(a.month));
+
+      const latest3 = sorted.slice(0, 3);
+      const latest6 = sorted.slice(0, 6);
+
+      const sum3 = latest3.reduce((sum, r) => sum + (Number(r.units_sold) || 0), 0);
+      const sum6 = latest6.reduce((sum, r) => sum + (Number(r.units_sold) || 0), 0);
+
+      out.set(skuKey, {
+        ams3m: latest3.length ? sum3 / latest3.length : 0,
+        ams6m: latest6.length ? sum6 / latest6.length : 0,
+      });
     });
 
-    return amsBySku;
+    return out;
   })();
 
-  return _amsPromise;
+  return _amsBothPromise;
+}
+
+export async function fetchAms3mBySku(): Promise<Map<string, number>> {
+  const both = await fetchAmsBySku();
+  const only3m = new Map<string, number>();
+  both.forEach((v, k) => only3m.set(k, v.ams3m));
+  return only3m;
 }
 
 export async function uploadSalesRowsFast(

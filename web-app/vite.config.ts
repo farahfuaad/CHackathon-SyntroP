@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/api/agent': {
+          target: 'http://localhost:7071',
+          changeOrigin: true,
+        },
       },
     },
     plugins: [react()],
