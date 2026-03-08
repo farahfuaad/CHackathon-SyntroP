@@ -347,6 +347,10 @@ function App() {
     </button>
   );
 
+  if (!currentUser) {
+    return <SignIn onSignIn={handleSignIn} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-slate-50">
       <aside className="w-64 bg-white border-r border-slate-200 p-6 flex flex-col gap-8 fixed h-full">

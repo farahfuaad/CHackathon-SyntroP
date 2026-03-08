@@ -121,19 +121,33 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
 
   const leadTimeRows = useMemo<SupplierRiskRow[]>(() => {
     return suppliers
-      .map((s, index): SupplierRiskRow => {
-        const leadTimeDays = Number((s as any).leadTimeDays ?? 0);
-        const reliability = Number((s as any).reliability ?? 1);
+      .map((s): SupplierRiskRow => {
+        const supplierId = String(s.id || "").trim();
+        const linkedSkus = inventory.filter((row) => String(row.supplierId || "").trim() === supplierId);
 
-        const rawSkuId = String((s as any).skuId ?? (s as any).supplierId ?? "").trim();
-        const skuId = rawSkuId && rawSkuId !== "N/A" ? rawSkuId : `SUP-${index + 1}`;
+        const totalFailures = linkedSkus.reduce(
+          (sum, row) => sum + (complaintMap.get(row.skuId)?.totalFailures || 0),
+          0
+        );
+        const total3mSales = linkedSkus.reduce(
+          (sum, row) => sum + ((amsMap.get(row.skuId) || 0) * 3),
+          0
+        );
 
+        let reliability = 1;
+        if (total3mSales > 0) {
+          reliability = Math.max(0, 1 - totalFailures / total3mSales);
+        } else if (totalFailures > 0) {
+          reliability = Math.max(0, 1 - totalFailures / 100);
+        }
+
+        const representative = linkedSkus[0];
         return {
-          skuId,
-          model: String((s as any).modelName ?? (s as any).supplierName ?? "Unknown"),
-          category: String((s as any).category ?? "General"),
-          leadTimeDays: Number.isFinite(leadTimeDays) ? leadTimeDays : 0,
-          reliability: Number.isFinite(reliability) ? reliability : 1,
+          skuId: representative?.skuId || `SUP-${supplierId || "N/A"}`,
+          model: representative?.modelName || s.name || "Unknown",
+          category: representative?.categoryLabel || "General",
+          leadTimeDays: Number(s.leadTimeDays) || 0,
+          reliability,
         };
       })
       .filter(
@@ -146,7 +160,7 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
         return b.leadTimeDays - a.leadTimeDays;
       })
       .slice(0, DASHBOARD_TOP_N);
-  }, [suppliers]);
+  }, [suppliers, inventory, complaintMap, amsMap]);
 
   if (loading) {
     return (
