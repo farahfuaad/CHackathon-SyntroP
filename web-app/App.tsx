@@ -30,6 +30,7 @@ import SpecUpdate from './components/SpecUpdate';
 import DataUpload from './components/DataUpload';
 import SignIn from './components/SignIn';
 import { authenticateUserByDb, type AuthenticatedUser } from './src/services/userAccessService';
+import { canAccessTab, getAllowedTabs, type AppTab } from './src/services/roleAccess';
 import { fetchPrList, type PrUiItem, type PrUiLineItem } from './src/services/prService';
 import { fetchContainerReference } from './src/services/containerService';
 import {
@@ -53,7 +54,16 @@ const AUTH_KEY = 'syntrop_auth'; // or store token under a different key
 const AUTH_USER_KEY = 'syntrop_auth_user';
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'container' | 'approvals' | 'spec' | 'data'>('dashboard');
+  const [activeTab, setActiveTabRaw] = useState<AppTab>('dashboard');
+
+  /** Guarded tab setter — silently redirects to dashboard if role cannot access the tab */
+  const setActiveTab = (tab: AppTab) => {
+    if (currentUser && !canAccessTab(currentUser.role, tab)) {
+      setActiveTabRaw('dashboard');
+      return;
+    }
+    setActiveTabRaw(tab);
+  };
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [skus, setSkus] = useState<SKU[]>(MOCK_SKUS);
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
@@ -362,12 +372,22 @@ function App() {
         </div>
 
         <nav className="flex flex-col gap-2">
-          <SidebarItem id="dashboard" label="Dashboard" icon={LayoutDashboard} />
-          <SidebarItem id="planning" label="Procurement Sheet" icon={Sheet} />
-          <SidebarItem id="container" label="Shipment Planning" icon={Package} />
-          <SidebarItem id="approvals" label="Queue and Approvals" icon={ClipboardClock} />
-          <SidebarItem id="spec" label="Specification Update" icon={PencilRuler} />
-          <SidebarItem id="data" label="Data Upload" icon={Upload} />
+          {(() => {
+            const allowed = getAllowedTabs(currentUser.role);
+            const allItems: { id: AppTab; label: string; icon: any }[] = [
+              { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+              { id: 'planning', label: 'Procurement Sheet', icon: Sheet },
+              { id: 'container', label: 'Shipment Planning', icon: Package },
+              { id: 'approvals', label: 'Queue and Approvals', icon: ClipboardClock },
+              { id: 'spec', label: 'Specification Update', icon: PencilRuler },
+              { id: 'data', label: 'Data Upload', icon: Upload },
+            ];
+            return allItems
+              .filter((item) => allowed.includes(item.id))
+              .map((item) => (
+                <SidebarItem key={item.id} id={item.id} label={item.label} icon={item.icon} />
+              ));
+          })()}
         </nav>
       </aside>
 
@@ -450,6 +470,7 @@ function App() {
             <QueueApprovals
               skus={skus}
               buParams={buParams}
+              userRole={currentUser.role}
             />
           )}
           {activeTab === 'spec' && (

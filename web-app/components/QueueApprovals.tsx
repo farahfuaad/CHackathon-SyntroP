@@ -16,15 +16,20 @@ import {
   FileText,
   UserCheck,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Eye
 } from 'lucide-react';
+import type { AppUserRole } from '../src/services/userAccessService';
+import { canApproveReject } from '../src/services/roleAccess';
 
 interface Props {
   skus: SKU[];
   buParams: any;
+  userRole: AppUserRole;
 }
 
-const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams }) => {
+const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams, userRole }) => {
+  const isApprover = canApproveReject(userRole);
   const [prs, setPrs] = useState<PurchaseRequisition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -295,6 +300,12 @@ const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams }) =
             </div>
           </div>
           <div className="flex items-center gap-4">
+            {!isApprover && (
+              <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-widest">
+                <Eye size={12} />
+                Read Only
+              </span>
+            )}
             <div className="text-right">
               <span className="block text-xs font-bold text-slate-400 uppercase">Queue Status</span>
               <span className="text-sm font-bold text-blue-600">{pendingPrs.length} Pending Requests</span>
@@ -379,20 +390,23 @@ const QueueApprovals: React.FC<Props> = ({ skus: _skus, buParams: _buParams }) =
                               <div className="flex items-start gap-3">
                                 <AlertCircle size={18} className="text-blue-600 mt-0.5" />
                                 <p className="text-xs text-blue-800 leading-relaxed">
-                                  Review the container utilization and line items before processing. 
-                                  Approved requests will be dispatched to suppliers immediately.
+                                  {isApprover
+                                    ? 'Review the container utilization and line items before processing. Approved requests will be dispatched to suppliers immediately.'
+                                    : 'View Only \u2014 Pending Approver Decision'}
                                 </p>
                               </div>
                             </div>
                           )}
 
-                          {processingId === pr.id ? (
+                          {isApprover && processingId === pr.id && (
                             <div className="bg-slate-900 text-white rounded-2xl p-8 flex flex-col items-center text-center">
                               <Loader2 className="animate-spin mb-4" size={32} />
                               <h4 className="font-bold mb-1">{actionLabel}</h4>
                               <p className="text-slate-400 text-[10px] uppercase tracking-widest">Processing Request...</p>
                             </div>
-                          ) : (
+                          )}
+
+                          {isApprover && processingId !== pr.id && (
                             <div className="space-y-3">
                               <button 
                                 type="button"
