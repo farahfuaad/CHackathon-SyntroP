@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Info, ShoppingCart, X } from 'lucide-react';
 import { fetchInventoryListingAndWarehouseMap, InventorySkuListing } from '../src/services/productDetailService';
-import { fetchAms3mBySku } from '../src/services/salesService';
+import { fetchAmsBySku, AmsBySku } from '../src/services/salesService';
 import { fetchSupplierListing, SupplierListing } from '../src/services/supplierService';
 import { WarehouseStockDetail } from '../src/services/warehouseService';
+import { saveProcurementMetricsSnapshot } from '../src/services/procurementMetricsService';
 
 interface Props {
   onAddToPlanning: (skuId: string) => void;
@@ -20,7 +21,7 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
   const [lastAddedSkuId, setLastAddedSkuId] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [rows, setRows] = useState<InventorySkuListing[]>([]);
-  const [ams3mBySku, setAms3mBySku] = useState<Map<string, number>>(new Map());
+  const [amsBySku, setAmsBySku] = useState<Map<string, AmsBySku>>(new Map());
   const [supplierOptions, setSupplierOptions] = useState<SupplierListing[]>([]);
   const [warehouseBySku, setWarehouseBySku] = useState<Map<string, WarehouseStockDetail[]>>(new Map());
   const [selectedSkuForModal, setSelectedSkuForModal] = useState<InventorySkuListing | null>(null);
@@ -36,21 +37,30 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
       try {
         setIsLoading(true);
 
-        // 1) Critical data first
-        const { listing, warehouseMap } = await fetchInventoryListingAndWarehouseMap();
+        // Load all data needed by ProcurementSheet in parallel
+        const [
+          { listing, warehouseMap },
+          suppliers,
+          salesAmsMap,
+        ] = await Promise.all([
+          fetchInventoryListingAndWarehouseMap(),
+          fetchSupplierListing(),
+          fetchAmsBySku(),
+        ]);
+
         if (!mounted) return;
+
+        // Render listing first
         setRows(listing);
         setWarehouseBySku(warehouseMap);
-        setIsLoading(false); // render table immediately
-
-        // 2) Non-critical data in background
-        const [suppliers, salesAmsMap] = await Promise.all([
-          fetchSupplierListing(),
-          fetchAms3mBySku(),
-        ]);
-        if (!mounted) return;
         setSupplierOptions(suppliers);
-        setAms3mBySku(salesAmsMap);
+        setAmsBySku(salesAmsMap);
+        setIsLoading(false);
+
+        // Push computed snapshot to DB in background (non-blocking UI)
+        void saveProcurementMetricsSnapshot(listing, salesAmsMap).catch((err) => {
+          console.error('Failed to persist procurement metrics snapshot:', err);
+        });
       } catch (err) {
         console.error('Failed to fetch procurement sheet data:', err);
         if (mounted) setIsLoading(false);
@@ -166,6 +176,7 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
               ))}
             </select>
           </div>
+
           <button
             onClick={() => setIsCartOpen(true)}
             className="relative px-3 py-2 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all flex items-center gap-2"
@@ -199,7 +210,9 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                 <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">Incoming</th>
                 <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">Total Stock</th>
                 <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">AMS (3m)</th>
-                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">Stock Last (Mo)</th>
+                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">Stock Last (3m)</th>
+                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">AMS (6m)</th>
+                <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">Stock Last (6m)</th>
                 <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-center">Action</th>
               </tr>
             </thead>
@@ -214,7 +227,7 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                         <div className="h-2.5 bg-slate-100 rounded w-16" />
                       </div>
                     </td>
-                    {Array.from({ length: 7 }).map((_, j) => (
+                    {Array.from({ length: 9 }).map((_, j) => (
                       <td key={j} className="px-4 py-4 text-center">
                         <div className="h-3.5 bg-slate-200 rounded mx-auto w-10" />
                       </td>
@@ -223,12 +236,21 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                 ))
               ) : visibleRows.map((row) => {
                 const skuKey = normalizeSkuKey(row.skuId);
-                const ams3m = ams3mBySku.get(skuKey) ?? 0;
-                const stockLast = ams3m > 0 ? (row.totalStock / ams3m).toFixed(1) : '0.0';
-                const isLow = Number(stockLast) < 1.5;
+                const ams = amsBySku.get(skuKey);
+
+                const ams3m = ams?.ams3m ?? (row.stockLast3m > 0 ? row.stockLast3m / 3 : 0);
+                const ams6m = ams?.ams6m ?? (row.stockLast6m > 0 ? row.stockLast6m / 6 : 0);
+
+                const stockLast3m = ams3m > 0 ? row.totalStock / ams3m : 0;
+                const stockLast6m = ams6m > 0 ? row.totalStock / ams6m : 0;
+
+                const isLow3m = stockLast3m < 1.5;
+                const isLow6m = stockLast6m < 1.5;
+
                 const hasIncoming = row.incoming > 0;
+                const demandSignal = ams3m > 0 ? ams3m : ams6m;
                 const derivedStatus = !hasIncoming && row.inHand === 0
-                  ? (ams3m > 0 ? 'inactive' : 'new')
+                  ? (demandSignal > 0 ? 'inactive' : 'new')
                   : null;
 
                 return (
@@ -263,14 +285,25 @@ const ProcurementSheet: React.FC<Props> = ({ onAddToPlanning }) => {
                     <td className="px-4 py-4 text-center font-medium text-slate-600">{row.inHand}</td>
                     <td className="px-4 py-4 text-center font-medium text-blue-600">{row.incoming}</td>
                     <td className="px-4 py-4 text-center font-bold text-slate-900">{row.totalStock}</td>
+
                     <td className="px-4 py-4 text-center font-medium text-slate-600">{ams3m.toFixed(1)}</td>
                     <td className="px-4 py-4 text-center">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                        isLow ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'
+                        isLow3m ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'
                       }`}>
-                        {stockLast} Mo
+                        {stockLast3m.toFixed(1)} Mo
                       </span>
                     </td>
+
+                    <td className="px-4 py-4 text-center font-medium text-slate-600">{ams6m.toFixed(1)}</td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                        isLow6m ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'
+                      }`}>
+                        {stockLast6m.toFixed(1)} Mo
+                      </span>
+                    </td>
+
                     <td className="px-4 py-4 text-center">
                       <button
                         onClick={(e) => {
