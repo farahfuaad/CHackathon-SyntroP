@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { InventorySkuListing } from '../src/services/productDetailService';
 import type { SupplierListing } from '../src/services/supplierService';
 import type { ComplaintAggBySku } from '../src/services/complaintService';
@@ -57,9 +57,16 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
   const [selectedItem, setSelectedItem] = useState<SlowMovingItem | null>(null);
   const [agentSlowMovingItems, setAgentSlowMovingItems] = useState<SlowMovingItem[]>([]);
   const [agentLoading, setAgentLoading] = useState(true);
+  const agentTriggeredRef = useRef(false);
 
   useEffect(() => {
+    // Trigger right after login/data load is ready
+    if (loading) return;
+    if (agentTriggeredRef.current) return;
+    agentTriggeredRef.current = true;
+
     let active = true;
+
     (async () => {
       try {
         setAgentLoading(true);
@@ -73,10 +80,11 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
         if (active) setAgentLoading(false);
       }
     })();
+
     return () => {
       active = false;
     };
-  }, []);
+  }, [loading]);
 
   // Slow moving fallback (current rule-based logic)
   const fallbackSlowMovingItems = useMemo(() => {
@@ -101,7 +109,18 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
   }, [inventory, amsMap]);
 
   const slowMovingItems = agentSlowMovingItems.length > 0 ? agentSlowMovingItems : fallbackSlowMovingItems;
-  const slowMovingTop5 = slowMovingItems.slice(0, DASHBOARD_TOP_N);
+
+  // Enrich agent rows with inventory model names
+  const slowMovingItemsWithModel = useMemo(() => {
+    if (slowMovingItems.length === 0) return slowMovingItems;
+    const bySku = new Map(inventory.map((i) => [i.skuId, i]));
+    return slowMovingItems.map((item) => ({
+      ...item,
+      model: bySku.get(item.skuId)?.modelName || item.model || item.skuId,
+    }));
+  }, [slowMovingItems, inventory]);
+
+  const slowMovingTop5 = slowMovingItemsWithModel.slice(0, DASHBOARD_TOP_N);
 
   // Quality chart: failure rate relative to AMS, per SKU with complaints
   const chartData = useMemo(() => {
@@ -214,8 +233,8 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
               </div>
               <h3 className="text-lg font-bold text-slate-800">Slow Moving Alerts</h3>
             </div>
-            {slowMovingItems.length > 0 && (
-              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full uppercase">{slowMovingItems.length} Alert{slowMovingItems.length !== 1 ? 's' : ''}</span>
+            {slowMovingItemsWithModel.length > 0 && (
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full uppercase">{slowMovingItemsWithModel.length} Alert{slowMovingItemsWithModel.length !== 1 ? 's' : ''}</span>
             )}
           </div>
           <div className="space-y-3">
@@ -236,8 +255,20 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right hidden sm:block">
-                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
-                        {item.flagLevel === "Watchlist" ? "WATCHLIST" : "STAGNANT"}
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          item.flagLevel === "DoNotReorder"
+                            ? "text-red-700 bg-red-50 border-red-100"
+                            : item.flagLevel === "Watchlist"
+                            ? "text-amber-700 bg-amber-50 border-amber-100"
+                            : "text-slate-700 bg-slate-100 border-slate-200"
+                        }`}
+                      >
+                        {item.flagLevel === "DoNotReorder"
+                          ? "DO NOT REORDER"
+                          : item.flagLevel === "Watchlist"
+                          ? "WATCHLIST"
+                          : "REORDER OK"}
                       </span>
                     </div>
                     <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all" />
@@ -245,7 +276,7 @@ const RiskDashboard: React.FC<Props> = ({ inventory, amsMap, complaintMap, suppl
                 </button>
               ))
             )}
-            {slowMovingItems.length > DASHBOARD_TOP_N && (
+            {slowMovingItemsWithModel.length > DASHBOARD_TOP_N && (
               <button
                 onClick={() => onNavigate?.('planning')}
                 className="w-full text-center text-sm font-semibold text-blue-600 hover:text-blue-700 pt-2 transition-colors flex items-center justify-center gap-1"
