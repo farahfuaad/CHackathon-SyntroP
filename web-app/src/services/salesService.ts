@@ -122,10 +122,10 @@ export async function buildSalesPreview(file: File): Promise<PreviewRow[]> {
 
 type SalesUploadApiResponse = Partial<UploadResult>;
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
-const SALES_UPLOAD_ENDPOINT = (
-  import.meta.env.VITE_SALES_UPLOAD_ENDPOINT || `${API_BASE}/sales/upload`
-).replace(/\/$/, "");
+const API_BASE = import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, "");
+
+const SALES_UPLOAD_ENDPOINT =
+  import.meta.env.VITE_SALES_UPLOAD_ENDPOINT || `${API_BASE}/sales/upload`;
 const DAB_SALES_ENDPOINT = `${API_BASE}/sales`;
 
 const CHUNK_SIZE = Math.max(1, Number(import.meta.env.VITE_SALES_UPLOAD_CHUNK_SIZE ?? 2000));
@@ -256,7 +256,7 @@ async function postSalesChunkWithRetry(
   throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} failed: ${lastError}`);
 }
 
-import { apiGetListAll, apiPostBatched } from "./apiClient";
+import { apiGetListAll, apiPostBatched, API_BASE_URL } from "./apiClient";
 
 type BulkChunkResult = { inserted?: number; updated?: number; failed?: number; errors?: string[] };
 const SALES_BULK_ENTITY = import.meta.env.VITE_SALES_BULK_ENTITY || "sales_bulk_upsert";

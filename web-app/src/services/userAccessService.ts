@@ -1,3 +1,5 @@
+import { API_BASE_URL } from "./apiClient";
+
 export type AppUserRole = 'PROCUREMENT_TEAM' | 'APPROVER';
 
 export type AuthenticatedUser = {
@@ -22,10 +24,7 @@ type AccessRoleRow = {
   role_name?: string | null;
 };
 
-const REST_BASE_CANDIDATES = [
-  import.meta.env.VITE_API_BASE_URL,
-  '/api'
-].filter(Boolean) as string[];
+const API_BASE = API_BASE_URL;
 
 const buildUrl = (base: string, path: string) => `${base.replace(/\/$/, '')}${path}`;
 const esc = (v: string) => v.replace(/'/g, "''");
@@ -66,7 +65,7 @@ export async function authenticateUserByDb(
 ): Promise<AuthenticatedUser | null> {
   let lastErr = '';
 
-  for (const base of REST_BASE_CANDIDATES) {
+  for (const base of [API_BASE]) {
     try {
       // 1) user lookup (NO expand)
       const uq = new URLSearchParams();
