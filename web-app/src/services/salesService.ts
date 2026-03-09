@@ -122,9 +122,11 @@ export async function buildSalesPreview(file: File): Promise<PreviewRow[]> {
 
 type SalesUploadApiResponse = Partial<UploadResult>;
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/data-api/rest').replace(/\/$/, '');
-const SALES_UPLOAD_ENDPOINT = import.meta.env.VITE_SALES_UPLOAD_ENDPOINT || '/api/sales/upload';
-const DAB_SALES_ENDPOINT = `${API_BASE}/Sales`;
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+const SALES_UPLOAD_ENDPOINT = (
+  import.meta.env.VITE_SALES_UPLOAD_ENDPOINT || `${API_BASE}/sales/upload`
+).replace(/\/$/, "");
+const DAB_SALES_ENDPOINT = `${API_BASE}/sales`;
 
 const CHUNK_SIZE = Math.max(1, Number(import.meta.env.VITE_SALES_UPLOAD_CHUNK_SIZE ?? 2000));
 const MAX_RETRIES = Math.max(0, Number(import.meta.env.VITE_SALES_UPLOAD_MAX_RETRIES ?? 3));
@@ -289,7 +291,7 @@ export function fetchAmsBySku(): Promise<Map<string, AmsBySku>> {
 
   _amsBothPromiseTs = Date.now();
   _amsBothPromise = (async (): Promise<Map<string, AmsBySku>> => {
-    const rows = await apiGetListAll<SalesRow>("Sales");
+    const rows = await apiGetListAll<SalesRow>("sales");
 
     const bySku = new Map<string, SalesRow[]>();
     rows.forEach((row) => {

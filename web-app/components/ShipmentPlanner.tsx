@@ -61,6 +61,76 @@ type UtilizationStats = {
   weightPercent: number;
 };
 
+type ContainerSpec = {
+  container_id?: string | number;
+  container_type?: string;
+  name?: string;
+};
+
+function normalizeContainerRefs(rows: unknown[]): ContainerSpec[] {
+  return rows
+    .map((r) => {
+      const x = r as Record<string, unknown>;
+      const containerId =
+        x.container_id ?? x.containerId ?? x.id ?? x.container_no ?? x.containerNo;
+      const containerType =
+        (x.container_type ?? x.containerType ?? x.type ?? x.name) as string | undefined;
+      const name = (x.name ?? x.containerName ?? x.container_type) as string | undefined;
+
+      return {
+        container_id: containerId as string | number | undefined,
+        container_type: containerType,
+        name,
+      };
+    })
+    .filter((c) => c.container_id !== undefined || !!c.container_type || !!c.name);
+}
+
+const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+function toContainerIdNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function resolveContainerIdOrThrow(
+  selectedLabel: string,
+  uiContainers: ContainerType[],
+  dbContainers: ContainerSpec[]
+): number {
+  const selected = norm(selectedLabel);
+
+  let hit = dbContainers.find(
+    (c) =>
+      norm(c.container_type) === selected ||
+      norm(c.name) === selected ||
+      norm(c.container_id) === selected
+  );
+  if (hit) {
+    const id = toContainerIdNumber(hit.container_id);
+    if (id !== null) return id;
+  }
+
+  const m = selectedLabel.match(/#\s*(\d+)/i);
+  if (m) {
+    const wanted = Number(m[1]);
+    hit = dbContainers.find((c) => toContainerIdNumber(c.container_id) === wanted);
+    if (hit) return wanted;
+  }
+
+  const ui = uiContainers.find((c) => norm(c.name) === selected);
+  if (ui) {
+    hit = dbContainers.find((c) => norm(c.container_type) === norm(ui.name));
+    if (hit) {
+      const id = toContainerIdNumber(hit.container_id);
+      if (id !== null) return id;
+    }
+  }
+
+  throw new Error(`Selected container is not mapped in DB: "${selectedLabel}"`);
+}
+
 const ContainerPlanner: React.FC<Props> = ({
   skus,
   containerTypes,
@@ -81,6 +151,7 @@ const ContainerPlanner: React.FC<Props> = ({
   const [isSavingPr, setIsSavingPr] = useState(false);
   const [banner, setBanner] = useState<BannerState>(null);
   const [dbProductSpecs, setDbProductSpecs] = useState<Map<string, ProductSpecListing>>(new Map());
+  const [dbContainerRefs, setDbContainerRefs] = useState<ContainerSpec[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -100,6 +171,23 @@ const ContainerPlanner: React.FC<Props> = ({
         setDbProductSpecs(bySku);
       } catch (err) {
         console.error("Failed to load Product specs for utilization:", err);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const refs = await fetchContainerReference();
+        if (!mounted) return;
+        setDbContainerRefs(Array.isArray(refs) ? normalizeContainerRefs(refs) : []);
+      } catch (err) {
+        console.error("Failed to load container mapping:", err);
       }
     })();
 
@@ -225,74 +313,6 @@ const ContainerPlanner: React.FC<Props> = ({
     [selectedSkus, containerType, skus, dbProductSpecs]
   );
 
-  function normalizeContainerKey(v: string): string {
-    return (v || "")
-      .toLowerCase()
-      .replace(/\(.*?\)/g, "")
-      .replace(/[^a-z0-9]/g, "");
-  }
-
-  const resolveContainerId = async (): Promise<number> => {
-    const selected = containerTypes.find((c) => c.name === selectedContainerName) as
-      | (ContainerType & { id?: number })
-      | undefined;
-
-    const localId = Number(selected?.id);
-    if (Number.isFinite(localId) && localId > 0) return localId;
-
-    const refs = await fetchContainerReference();
-    const selectedKey = normalizeContainerKey(selectedContainerName);
-
-    let hit = refs.find((r) => normalizeContainerKey(r.name) === selectedKey);
-
-    if (!hit && selected) {
-      hit = refs.find(
-        (r) =>
-          Number(r.capacityCbm) === Number(selected.capacityCbm) &&
-          Number(r.maxWeightKg) === Number(selected.maxWeightKg)
-      );
-    }
-
-    if (hit?.id) return hit.id;
-    throw new Error(`Selected container is not mapped in DB: "${selectedContainerName}"`);
-  };
-
-  const getInvalidSkuMessages = (items: { skuId: string; qty: number }[]) => {
-    const errors: string[] = [];
-
-    items.forEach((item) => {
-      const sku = getSkuSpecForCalc(item.skuId);
-
-      // If SKU is absent from both DB specs and local list, skip strict validation.
-      if (!sku) return;
-
-      const l = Number(sku.lengthCm || 0);
-      const w = Number(sku.widthCm || 0);
-      const h = Number(sku.heightCm || 0);
-      const weight = Number(sku.weightKg || 0);
-
-      if (l <= 0 || w <= 0 || h <= 0) {
-        errors.push(`SKU "${sku.model || sku.skuId}" has missing or invalid dimensions.`);
-      }
-
-      if (weight <= 0) {
-        errors.push(`SKU "${sku.model || sku.skuId}" has missing or invalid weight.`);
-      }
-    });
-
-    return errors;
-  };
-
-  const resetPlannerAfterSubmit = () => {
-    setSelectedSkus([]);
-    setPlanningTitle("");
-    setCurrentDraftId(null);
-    setBanner({
-      type: "success",
-      message: "PR submitted to approval queue successfully. Status: Pending Approval.",
-    });
-  };
-
   const handleSaveDraft = async () => {
     setBanner(null);
 
@@ -309,7 +329,11 @@ const ContainerPlanner: React.FC<Props> = ({
     const draftId = currentDraftId || `PR-${Date.now().toString().slice(-10)}`;
 
     try {
-      const containerId = await resolveContainerId();
+      const containerId = resolveContainerIdOrThrow(
+        selectedContainerName,
+        containerTypes,
+        dbContainerRefs
+      );
 
       await saveDraftPr({
         id: draftId,
@@ -353,6 +377,42 @@ const ContainerPlanner: React.FC<Props> = ({
     }
   };
 
+  const getInvalidSkuMessages = (items: { skuId: string; qty: number }[]): string[] => {
+    const messages: string[] = [];
+
+    for (const item of items) {
+      const skuId = (item.skuId || "").trim();
+      if (!skuId) {
+        messages.push("One selected item has an empty SKU.");
+        continue;
+      }
+
+      const spec = getSkuSpecForCalc(skuId);
+      if (!spec) {
+        messages.push(`SKU "${skuId}" is missing product specs.`);
+        continue;
+      }
+
+      if ((Number(item.qty) || 0) <= 0) {
+        messages.push(`SKU "${skuId}" has invalid quantity.`);
+      }
+
+      if (
+        Number(spec.lengthCm) <= 0 ||
+        Number(spec.widthCm) <= 0 ||
+        Number(spec.heightCm) <= 0
+      ) {
+        messages.push(`SKU "${skuId}" has invalid dimensions.`);
+      }
+
+      if (Number(spec.weightKg) <= 0) {
+        messages.push(`SKU "${skuId}" has invalid weight.`);
+      }
+    }
+
+    return messages;
+  };
+
   const handleGeneratePr = async () => {
     setBanner(null);
 
@@ -390,7 +450,11 @@ const ContainerPlanner: React.FC<Props> = ({
 
     try {
       setIsSavingPr(true);
-      const containerId = await resolveContainerId();
+      const containerId = resolveContainerIdOrThrow(
+        selectedContainerName,
+        containerTypes,
+        dbContainerRefs
+      );
 
       if (currentDraftId) {
         await saveDraftPr({
@@ -463,6 +527,16 @@ const ContainerPlanner: React.FC<Props> = ({
     } finally {
       setIsSavingPr(false);
     }
+  };
+
+  const resetPlannerAfterSubmit = () => {
+    setSelectedSkus([]);
+    setPlanningTitle("");
+    setCurrentDraftId(null);
+    setBanner({
+      type: "success",
+      message: "PR submitted to approval queue successfully. Status: Pending Approval.",
+    });
   };
 
   return (

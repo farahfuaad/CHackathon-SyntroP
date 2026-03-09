@@ -33,8 +33,7 @@ export type SlowMovingAgentItem = {
 
 // Prefer env override; default to local foundry-agent server
 const AGENT_API_URL =
-  (import.meta as any)?.env?.VITE_AGENT_API_URL ||
-  "http://localhost:7071/api/agent/chat";
+  import.meta.env.VITE_AGENT_API_URL || "";
 
 function toNum(v: unknown, d = 0): number {
   return typeof v === "number" && Number.isFinite(v) ? v : d;

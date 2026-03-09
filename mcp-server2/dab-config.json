@@ -24,7 +24,11 @@
     },
     "host": {
       "cors": {
-        "origins": ["*"],
+        "origins": [
+          "https://proud-sand-0a4114210.1.azurestaticapps.net",
+          "http://localhost:3000",
+          "http://localhost:5173"
+        ],
         "allow-credentials": false
       },
       "authentication": {
@@ -106,9 +110,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -145,9 +159,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -204,9 +228,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -253,9 +287,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -327,9 +371,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -381,14 +435,22 @@
         "lines": {
           "target.entity": "PRLine",
           "cardinality": "many",
-          "source.fields": [ "pr_id" ],
-          "target.fields": [ "pr_id" ]
+          "source.fields": [
+            "pr_id"
+          ],
+          "target.fields": [
+            "pr_id"
+          ]
         },
         "container": {
           "target.entity": "ContainerSpecs",
           "cardinality": "one",
-          "source.fields": [ "container_id" ],
-          "target.fields": [ "container_id" ]
+          "source.fields": [
+            "container_id"
+          ],
+          "target.fields": [
+            "container_id"
+          ]
         }
       },
       "graphql": {
@@ -405,12 +467,23 @@
         {
           "role": "anonymous",
           "actions": [
-            { "action": "read" }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
     },
-
     "PRLine": {
       "description": "Purchase Request line items",
       "source": {
@@ -453,20 +526,32 @@
         "pr": {
           "target.entity": "PR",
           "cardinality": "one",
-          "source.fields": [ "pr_id" ],
-          "target.fields": [ "pr_id" ]
+          "source.fields": [
+            "pr_id"
+          ],
+          "target.fields": [
+            "pr_id"
+          ]
         },
         "product": {
           "target.entity": "Product",
           "cardinality": "one",
-          "source.fields": [ "sku_id" ],
-          "target.fields": [ "sku_id" ]
+          "source.fields": [
+            "sku_id"
+          ],
+          "target.fields": [
+            "sku_id"
+          ]
         },
         "supplier": {
           "target.entity": "supplier",
           "cardinality": "one",
-          "source.fields": [ "supplier_id" ],
-          "target.fields": [ "supplier_id" ]
+          "source.fields": [
+            "supplier_id"
+          ],
+          "target.fields": [
+            "supplier_id"
+          ]
         }
       },
       "graphql": {
@@ -483,7 +568,19 @@
         {
           "role": "anonymous",
           "actions": [
-            { "action": "read" }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -540,9 +637,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -589,9 +696,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -619,9 +736,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
@@ -673,9 +800,19 @@
         {
           "role": "anonymous",
           "actions": [
-            {
-              "action": "read"
-            }
+            "create",
+            "read",
+            "update",
+            "delete"
+          ]
+        },
+        {
+          "role": "authenticated",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
           ]
         }
       ]
