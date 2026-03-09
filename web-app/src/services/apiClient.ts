@@ -1,6 +1,30 @@
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || "/data-api/rest"
-).replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+
+const ENTITY_ALIASES: Record<string, string> = {
+  Sales: "sales",
+  Warehouse: "warehouse",
+  Supplier: "supplier",
+};
+
+function resolveEntityName(entity: string): string {
+  return ENTITY_ALIASES[entity] ?? entity;
+}
+
+function buildUrl(entity: string, pkName?: string, pkValue?: string | number): string {
+  const resolved = resolveEntityName(entity);
+
+  if (pkName && pkValue !== undefined && pkValue !== null) {
+    // Explicit PK route for DAB (avoids implicit PK template error)
+    return `${API_BASE}/${resolved}/${encodeURIComponent(pkName)}/${encodeURIComponent(String(pkValue))}`;
+  }
+
+  if (pkValue !== undefined && pkValue !== null) {
+    // fallback legacy shape
+    return `${API_BASE}/${resolved}/${encodeURIComponent(String(pkValue))}`;
+  }
+
+  return `${API_BASE}/${resolved}`;
+}
 
 type DABListResponse<T> = { value: T[]; nextLink?: string };
 type QueryParams = Record<string, string | number>;
@@ -29,11 +53,6 @@ function toQuery(params?: QueryParams) {
     parts.push(`${k}=${encodeURIComponent(String(v))}`);
   });
   return parts.length ? `?${parts.join("&")}` : "";
-}
-
-function buildUrl(entity: string, ...segments: Array<string | number>) {
-  const path = [entity, ...segments].map((x) => encodeURIComponent(String(x))).join("/");
-  return `${API_BASE}/${path}`;
 }
 
 async function readError(res: Response, action: string, entity: string) {
