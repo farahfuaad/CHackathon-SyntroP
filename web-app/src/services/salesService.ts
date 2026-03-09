@@ -1,3 +1,5 @@
+import { apiGetListAll, apiPostBatched, API_BASE_URL } from "./apiClient";
+
 type PreviewRow = {
   col1: string;
   col2: string;
@@ -122,7 +124,8 @@ export async function buildSalesPreview(file: File): Promise<PreviewRow[]> {
 
 type SalesUploadApiResponse = Partial<UploadResult>;
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, "");
+// FIX: use normalized base from apiClient (never undefined)
+const API_BASE = API_BASE_URL.replace(/\/+$/, "");
 
 const SALES_UPLOAD_ENDPOINT =
   import.meta.env.VITE_SALES_UPLOAD_ENDPOINT || `${API_BASE}/sales/upload`;
@@ -256,8 +259,6 @@ async function postSalesChunkWithRetry(
   throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} failed: ${lastError}`);
 }
 
-import { apiGetListAll, apiPostBatched, API_BASE_URL } from "./apiClient";
-
 type BulkChunkResult = { inserted?: number; updated?: number; failed?: number; errors?: string[] };
 const SALES_BULK_ENTITY = import.meta.env.VITE_SALES_BULK_ENTITY || "sales_bulk_upsert";
 
@@ -291,10 +292,10 @@ export function fetchAmsBySku(): Promise<Map<string, AmsBySku>> {
 
   _amsBothPromiseTs = Date.now();
   _amsBothPromise = (async (): Promise<Map<string, AmsBySku>> => {
-    const rows = await apiGetListAll<SalesRow>("sales");
+    const rows: SalesRow[] = await apiGetListAll<SalesRow>("sales");
 
     const bySku = new Map<string, SalesRow[]>();
-    rows.forEach((row) => {
+    rows.forEach((row: SalesRow) => {
       const skuKey = normalizeSkuKey(row.sku_id || "");
       if (!skuKey) return;
       if (!bySku.has(skuKey)) bySku.set(skuKey, []);
@@ -340,7 +341,7 @@ export async function uploadSalesRowsFast(
   return apiPostBatched<SalesRow, BulkChunkResult>(
     SALES_BULK_ENTITY,
     rows,
-    (batch) => ({ rows: batch }),
+    (batch: SalesRow[]) => ({ rows: batch }),
     { batchSize: 1000, concurrency: 3, onProgress }
   );
 }
