@@ -1,11 +1,23 @@
-const rawApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+const RAW_API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
 
-export const API_BASE_URL =
-  rawApiBase && /^https?:\/\//i.test(rawApiBase)
-    ? rawApiBase.replace(/\/+$/, "")
-    : (import.meta.env.DEV
-        ? "http://localhost:5000/api"
-        : "https://mcp-syntropdb-latest.onrender.com/api");
+function resolveApiBase(): string {
+  // default for prod/dev if env missing
+  const fallback = import.meta.env.DEV
+    ? "http://localhost:5000/api"
+    : "https://mcp-syntropdb-latest.onrender.com/api";
+
+  let base = RAW_API_BASE || fallback;
+  base = base.replace(/\/+$/, "");
+
+  // ensure exactly one /api suffix
+  if (!/\/api$/i.test(base)) {
+    base = `${base}/api`;
+  }
+
+  return base;
+}
+
+export const API_BASE_URL = resolveApiBase();
 
 // Backward-compatible alias used below
 const API_BASE = API_BASE_URL;
@@ -20,8 +32,16 @@ function resolveEntityName(entity: string): string {
   return ENTITY_ALIASES[entity] ?? entity;
 }
 
+function normalizeEntityPath(entity: string): string {
+  // remove leading slash(es)
+  let e = entity.replace(/^\/+/, "");
+  // prevent /api/api/... when callers pass "api/Entity"
+  e = e.replace(/^api\/+/i, "");
+  return e;
+}
+
 function buildUrl(entity: string, pkName?: string, pkValue?: string | number): string {
-  const resolved = resolveEntityName(entity);
+  const resolved = normalizeEntityPath(resolveEntityName(entity));
 
   if (pkName && pkValue !== undefined && pkValue !== null) {
     // Explicit PK route for DAB (avoids implicit PK template error)
@@ -77,7 +97,10 @@ async function readError(res: Response, action: string, entity: string) {
 
 function resolveNextUrl(nextLink: string) {
   if (/^https?:\/\//i.test(nextLink)) return nextLink;
-  return `${API_BASE}${nextLink.startsWith("/") ? "" : "/"}${nextLink}`;
+
+  // If DAB returns "/api/Entity?...", join from origin to avoid "/api/api/..."
+  const baseOrigin = API_BASE.replace(/\/api$/i, "");
+  return `${baseOrigin}${nextLink.startsWith("/") ? "" : "/"}${nextLink}`;
 }
 
 async function fetchListPage<T>(url: string): Promise<{ items: T[]; nextLink?: string }> {
