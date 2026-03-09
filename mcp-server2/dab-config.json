@@ -25,11 +25,10 @@
     "host": {
       "cors": {
         "origins": [
-          "https://proud-sand-0a4114210.1.azurestaticapps.net",
           "http://localhost:3000",
-          "http://localhost:5173"
+          "https://farahfuaad.github.io"
         ],
-        "allow-credentials": false
+        "allow-credentials": true
       },
       "authentication": {
         "provider": "Simulator"
@@ -730,7 +729,8 @@
         }
       },
       "rest": {
-        "enabled": true
+        "enabled": true,
+        "path": "UserAccess"
       },
       "permissions": [
         {
