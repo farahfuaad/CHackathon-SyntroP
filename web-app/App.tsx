@@ -52,6 +52,20 @@ type BUParameters = {
 const AUTH_KEY = 'syntrop_auth'; // or store token under a different key
 const AUTH_USER_KEY = 'syntrop_auth_user';
 
+const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL?.trim() ||
+    (import.meta.env.DEV
+      ? "http://localhost:5000/api"
+      : "https://mcp-syntropdb-latest.onrender.com/api")
+  ).replace(/\/+$/, "");
+
+const AGENT_API_URL =
+  (import.meta.env.VITE_AGENT_API_URL?.trim() ||
+    (import.meta.env.DEV
+      ? "http://localhost:7071/api/agent/chat"
+      : "https://<your-render-agent-service>.onrender.com/api/agent/chat")
+  ).replace(/\/+$/, "");
+
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'planning' | 'container' | 'approvals' | 'spec' | 'data'>('dashboard');
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);

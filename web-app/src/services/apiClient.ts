@@ -1,4 +1,14 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+const rawApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+
+export const API_BASE_URL =
+  rawApiBase && /^https?:\/\//i.test(rawApiBase)
+    ? rawApiBase.replace(/\/+$/, "")
+    : (import.meta.env.DEV
+        ? "http://localhost:5000/api"
+        : "https://mcp-syntropdb-latest.onrender.com/api");
+
+// Backward-compatible alias used below
+const API_BASE = API_BASE_URL;
 
 const ENTITY_ALIASES: Record<string, string> = {
   Sales: "sales",
