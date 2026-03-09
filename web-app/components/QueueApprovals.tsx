@@ -3,8 +3,8 @@ import { SKU, PurchaseRequisition } from '../types';
 import { MOCK_SUPPLIERS } from '../constants';
 import { fetchPrWithLines, updatePr } from '../src/services/prService';
 import { fetchSupplierListing, type SupplierListing } from '../src/services/supplierService';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { 
   CheckCircle, 
   XCircle, 

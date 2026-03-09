@@ -23,9 +23,8 @@ type AccessRoleRow = {
 };
 
 const REST_BASE_CANDIDATES = [
-  import.meta.env.VITE_REST_BASE_URL, // optional override
-  '/rest',                            // Vite proxy (local)
-  '/data-api/rest',                   // SWA path
+  import.meta.env.VITE_API_BASE_URL,
+  '/api'
 ].filter(Boolean) as string[];
 
 const buildUrl = (base: string, path: string) => `${base.replace(/\/$/, '')}${path}`;
