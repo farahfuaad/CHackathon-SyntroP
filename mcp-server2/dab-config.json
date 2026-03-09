@@ -25,10 +25,9 @@
     "host": {
       "cors": {
         "origins": [
-          "http://localhost:3000",
-          "https://farahfuaad.github.io"
+          "*"
         ],
-        "allow-credentials": true
+        "allow-credentials": false
       },
       "authentication": {
         "provider": "Simulator"
